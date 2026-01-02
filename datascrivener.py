@@ -3,24 +3,37 @@ THE SCOPE CREEP IS REAL
 """
 from datamodel import Klant, Particulier, Professioneel, Voertuig, Reservering, RESERVATIE_NUMMER, BTW, RRN, VIN, Bouwjaar
 from abc import ABC, abstractmethod
-from typing import TypeVar, Generic, Any, get_type_hints
+from typing import Any, get_type_hints, cast
 from datetime import date
 from rapidfuzz import process, fuzz, utils
-from dataclasses import asdict
 import string
+import weakref
+from collections.abc import Iterator
 
-T = TypeVar("T")
-
-class Fuzzable(Generic[T]):
+class Fuzzable[T]:
     """
     Wrapper that encapsulates scoring logic,  and matching string.
     Responsibility for 'fuzzy matching' and 'comparison' lies here.
     """
     def __init__(self, obj: T, *searchable_attributes: str):
-        self.obj = obj
-        self.attrs = searchable_attributes
-        self.score: float = -1
+        self._obj_ref = weakref.ref(obj)
+        self._search_cache: tuple[str, ...]
         self.match: str | None = None
+        self.score: float = -1
+
+        self.refresh_cache(*searchable_attributes)
+
+    @property
+    def obj(self) -> T:
+        if self._obj_ref() is None:
+            raise RuntimeError("Fuzzable accessed after underlying object was collected.")
+        # Dereference: returns the object if it exists
+        return cast(T, self._obj_ref())
+
+    def refresh_cache(self, *args):
+        """Rebuilds the strings used for fuzzy matching."""
+        self._search_cache = tuple(str(getattr(self.obj, attr, None)) for attr in args if getattr(self.obj, attr, None) is not None)
+        self.match = None
 
     def fuzz(self, query: str) -> float:
         """
@@ -28,8 +41,7 @@ class Fuzzable(Generic[T]):
         Extracts the best match in a list of choices.
         """
         minimum=40 + min(30, 6*len(query))
-        values = [str(getattr(self.obj, attr)) for attr in self.attrs]
-        fuzzed = process.extractOne(query, choices=values, scorer=fuzz.WRatio, score_cutoff=minimum, processor=utils.default_process)
+        fuzzed = process.extractOne(query, choices=self._search_cache, scorer=fuzz.WRatio, score_cutoff=minimum, processor=utils.default_process)
         self.match, self.score = fuzzed[:2] if fuzzed else (None, 0)
         return self.score
 
@@ -39,17 +51,20 @@ class Fuzzable(Generic[T]):
     def __lt__(self, other: 'Fuzzable'):
         return self.score < other.score
 
-class TypeScribe(ABC, Generic[T]):
+class TypeScribe[T](ABC):
     """
     For when global lists aren't powerful enough. ୧(๑•̀ᗝ•́)૭
+    Keeps all my objects safe and only lets others peek from a window.
     """
-    """You want to have list, I keep list. You want to read from list, I read from list. You want to a new list, I write list."""
-    def __init__(self):
+    def __init__(self, *objects: T):
         self._objects: list[T] = []
-        self._current_view: list[Fuzzable[T]] = []
-        self._current_type: str | None = None
+        self._window: list[Fuzzable[T]] = []
         self._hidden: list[Fuzzable[T]] = []
+        self._current_type: str | None = None
         self._last_query: str = ""
+
+        for obj in objects:
+            self.add(obj)
 
     @property
     def all(self) -> list[T]:
@@ -58,26 +73,48 @@ class TypeScribe(ABC, Generic[T]):
 
     @property
     def view(self) -> list[T]:
-        """Returns the objects in the current view."""
-        return [item.obj for item in self._current_view]
+        """Returns the objects in the window."""
+        return [fuzzable.obj for fuzzable in self._window[:]]
     
     @property
     def count(self) -> int:
         """Return the total number of objects in the current view."""
-        return len(self._current_view)
+        return len(self._window)
  
     @property
     def map(self) -> dict[str, T]:
         """Note: Objects T must implement a .uid property."""
         return {getattr(obj, 'uid'): obj for obj in self._objects}
 
+    @property
+    @abstractmethod
+    def searchable_attrributes(self) -> tuple[str,...]:
+        """Returns a list of usuable attribute names for a fuzzeable object."""
+        pass
+
+    #LIST DUNDERS
+    def __getitem__(self, index: int) -> T:
+        """
+        I'm a list. I am speed. (و •̀ ᴗ•́ )و
+        Indexing on view respects active data views, filters, and sorts.
+        """
+        return self._window[index].obj
+
+    def __len__(self) -> int:
+        return len(self._window)
+
+    def __iter__(self):
+        # This yields the actual dataclasses during iteration
+        for fuzzable in self._window:
+            yield fuzzable.obj
+
     def clear(self) -> None:
         self._objects.clear()
-        self._current_view.clear()
+        self._window.clear()
         self._hidden.clear()
         self._last_query = ""
     
-    #CONSTRUCT
+    #CREATE
     def _hydrate(self, data: dict[str, Any], key: str, lookup: dict[str, T]) -> None:
         """Lookup and replaces a UID string in a dictionary with a object."""
         val = data.get(key)
@@ -86,8 +123,23 @@ class TypeScribe(ABC, Generic[T]):
 
     def add(self, obj: T) -> None:
         self._objects.append(obj)
-        self._current_view.append(Fuzzable(obj, *self._set_searchable_attrributes(obj)))
+        self._add_fuzzable(obj)
 
+    def _add_fuzzable(self, obj: T):
+        fuzzable = Fuzzable(obj, *self.searchable_attrributes)
+        self._window.append(fuzzable)
+        weakref.finalize(obj, TypeScribe._remove_fuzzable, fuzzable, self._window, self._hidden)
+
+    #REMOVE
+    @staticmethod
+    def _remove_fuzzable(fuzzable: Fuzzable, *lists: list[Fuzzable]):
+        for l in lists:
+            try:
+                l.remove(fuzzable)
+            except ValueError:
+                pass
+
+    #CONSTRUCT
     @abstractmethod
     def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, Any]) -> None:
         """
@@ -98,27 +150,19 @@ class TypeScribe(ABC, Generic[T]):
 
     def refresh(self, all=True) -> None:
         """Reset the search state and populate the current view heap."""
-        self._current_view.clear()
+        self._window.clear()
         self._hidden.clear()
         if all:
             self._last_query = ""
             self._current_type = None
-            self._current_view = [Fuzzable(obj, *self._set_searchable_attrributes(obj)) for obj in self._objects]
+            self._window = [Fuzzable(obj, *self.searchable_attrributes) for obj in self._objects]
         if not all:
             collection = [obj for obj in self._objects if self._issubtype(obj)] if self._current_type else self._objects
-            self._current_view = [Fuzzable(obj, *self._set_searchable_attrributes(obj)) for obj in collection]
+            self._window = [Fuzzable(obj, *self.searchable_attrributes) for obj in collection]
             query = self._last_query.strip(string.punctuation)
             if query:
                 self.run_query(query)
-
-    #VIEW
-    def __getitem__(self, index: int) -> T:
-        """
-        I'm a list. I am speed. (و •̀ ᴗ•́ )و
-        Indexing on view respects active data views, filters, and sorts.
-        """
-        return self._current_view[index].obj
-
+                
     @abstractmethod
     def _issubtype(self, obj: T) -> bool:
         """Checks if an object's class name or specific attribute matches a set category."""
@@ -133,12 +177,7 @@ class TypeScribe(ABC, Generic[T]):
         """Sets a type name or attribue value of a category of objects in this scribe."""
         self._current_type = filter
         self.refresh(all=False)
-
-    @abstractmethod
-    def _set_searchable_attrributes(self, obj: T) -> tuple[str,...]:
-        """Returns a list of attribute names from a fuzzeable object usuable for a search query."""
-        pass
-
+        
     def run_query(self, query: str, sort=True) -> None:
         """Processes a fuzzy query, updates the internal _current_view heap"""
         query = query.strip(string.punctuation)
@@ -149,7 +188,7 @@ class TypeScribe(ABC, Generic[T]):
             while self._hidden:
                 item = self._hidden.pop()
                 if not query or item.fuzz(last_word) > 0:
-                    self._current_view.append(item)
+                    self._window.append(item)
                 else:
                     self._hidden.append(item)
                     break
@@ -157,15 +196,15 @@ class TypeScribe(ABC, Generic[T]):
             for word in query.split(" "):
                 #Prune
                 i = 0
-                while i < len(self._current_view):
-                    item = self._current_view[i]
+                while i < len(self._window):
+                    item = self._window[i]
                     if item.fuzz(word) > 0:
                         i += 1
                     else:
                         self._hidden.append(item)
-                        self._current_view.remove(item)
+                        self._window.remove(item)
         if sort:
-            self._current_view = sorted(self._current_view, key=lambda x: x.score, reverse=True)
+            self._window = sorted(self._window, key=lambda x: x.score, reverse=True)
         #! record last query
         self._last_query = query
 
@@ -174,7 +213,7 @@ class TypeScribe(ABC, Generic[T]):
         query = query.strip('.- ')
         self.run_query(query, sort=True)
         # get suggestion from top of the heap
-        suggestion = self._current_view[0].match if self._current_view else None
+        suggestion = self._window[0].match if self._window else None
         # formatting fix
         if suggestion:
             s_words = suggestion.split(" ")
@@ -191,9 +230,16 @@ class TypeScribe(ABC, Generic[T]):
         """Converts the object into a list of strings for display in a DataTable."""
         pass
 
+    def get_rows(self, start: int | None = None, end: int | None = None) -> Iterator[list[str]]:
+        """
+        Formats and yields rows that are actually requested.
+        """
+        for fuzzable in self._window[start:end]:
+            yield self._format_row(fuzzable.obj)
+
     @abstractmethod
-    def get_rows(self) -> list[list[str]]:
-        """Converts the object into a list of strings for display in a DataTable."""
+    def _format_row(self, obj: T) -> list[str]:
+        """Transform the dataclass object into a list of strings for a table."""
         pass
 
     # UPDATE
@@ -207,6 +253,10 @@ class TypeScribe(ABC, Generic[T]):
 
 class KlantScribe(TypeScribe[Klant]):
     """Scribe for managing Klanten (Particulier/Professioneel)."""
+   
+    @property
+    def searchable_attrributes(self) -> tuple[str,...]:
+        return 'uid', 'naam', 'postcode', 'gemeente'
 
     def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, Any]) -> None:
         """Accepts a flat list of dictionaries representing Klant objects."""
@@ -215,10 +265,7 @@ class KlantScribe(TypeScribe[Klant]):
                 self.add(Professioneel.from_dict(entry))
             else:
                 self.add(Particulier.from_dict(entry))
-    
-    def _set_searchable_attrributes(self, obj: Klant) -> tuple[str,...]:
-        return 'uid', 'naam', 'postcode', 'gemeente'
-
+ 
     def get_subtypes(self) -> list[str | None]:
         return [None, "Particulier", "Professioneel"]
     
@@ -230,16 +277,13 @@ class KlantScribe(TypeScribe[Klant]):
     def get_columns(self) -> tuple[str,...]:
         return "BTW/RRN", "Naam", "Straat", "Huisnummer", "Postcode", "Gemeente"
     
-    def get_rows(self) -> list[list[str]]:
-        table: list[list[str]] = []
-        for obj in self.view:
-            table.append([obj.uid, 
-                          obj.naam, 
-                          obj.straat, 
-                          f"{obj.huisnummer}",
-                          f"{obj.postcode}",
-                          obj.gemeente])
-        return table
+    def _format_row(self, obj: Klant) -> list[str]:
+        return [obj.uid, 
+                obj.naam,
+                obj.straat,
+                f"{obj.huisnummer}",
+                f"{obj.postcode}",
+                obj.gemeente]
     
     def update(self, obj: Klant | int, attr: str, value: Any) -> bool:
         if isinstance(obj, int) and obj < self.count:
@@ -260,12 +304,14 @@ class KlantScribe(TypeScribe[Klant]):
 class VoertuigScribe(TypeScribe[Voertuig]):
     """Scribe for managing Voertuigen."""
 
+    @property
+    def searchable_attrributes(self) -> tuple[str,...]:
+        return 'chassisnummer', 'merk', 'model', 'bouwjaar', 'soort', 'status'
+    
     def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, Any]) -> None:
         for entry in data_list:
             self.add(Voertuig.from_dict(entry))
-    
-    def _set_searchable_attrributes(self, obj: Voertuig) -> tuple[str,...]:
-        return 'chassisnummer', 'merk', 'model', 'bouwjaar', 'soort', 'status'
+            
 
     def get_subtypes(self) -> list[str | None]:
         return [None, "Personenwagens", "Bestelbusjes", "Beschikbaar", "Gereserveerd"]
@@ -278,15 +324,12 @@ class VoertuigScribe(TypeScribe[Voertuig]):
     def get_columns(self) -> tuple[str,...]:
         return "VIN", "Merk", "Model", "Bouwjaar", "Prijs", "Status"
     
-    def get_rows(self) -> list[list[str]]:
-        table: list[list[str]] = []
-        for obj in self.view:
-            table.append([obj.chassisnummer, 
-                          obj.merk, obj.model, 
-                          str(obj.bouwjaar),
-                          f"€{obj.dagprijs}", 
-                          obj.status.capitalize()])
-        return table
+    def _format_row(self, obj: Voertuig) -> list[str]:
+        return [obj.chassisnummer, 
+                obj.merk, obj.model, 
+                str(obj.bouwjaar),
+                f"€{obj.dagprijs}", 
+                obj.status.capitalize()]
     
     def update(self, obj: Voertuig | int, attr: str, value: Any) -> bool:
         if isinstance(obj, int) and obj < self.count:
@@ -308,6 +351,11 @@ class VoertuigScribe(TypeScribe[Voertuig]):
 
 class ReserveringScribe(TypeScribe[Reservering]):
     """Scribe for managing Reserveringen with dependency mapping."""
+    
+    @property
+    def searchable_attrributes(self) -> tuple[str,...]:
+        return 'nummer', 'strfklant', 'strfmodel', 'strfmerk', 'strstatus'
+    
     def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, Any]) -> None:
         map_klanten = next((m for m in maps if m and isinstance(next(iter(m.values())), Klant)), {})
         map_voertuigen = next((m for m in maps if m and isinstance(next(iter(m.values())), Voertuig)), {})
@@ -329,10 +377,7 @@ class ReserveringScribe(TypeScribe[Reservering]):
         #synchronise generator
         for _ in range(max_num):
             next(RESERVATIE_NUMMER)
-
-    def _set_searchable_attrributes(self, obj: Reservering) -> tuple[str,...]:
-        return 'nummer', 'fklant', 'fmodel', 'fmerk', 'status'
-
+            
     def get_subtypes(self) -> list[str | None]:
         return [None, "Ingeleverd", "Lopend", "Particulier", "Professioneel"] 
     
@@ -344,17 +389,14 @@ class ReserveringScribe(TypeScribe[Reservering]):
     def get_columns(self) -> tuple[str, ...]:
         return "Nummer", "Klant", "Merk", "Model", "Van", "Tot", "Status"
     
-    def get_rows(self) -> list[list[str]]:
-        table: list[list[str]] = []
-        for obj in self.view:
-            table.append([obj.nummer, 
-                          obj.fklant,
-                          obj.fmerk, 
-                          obj.fmodel,
-                          str(obj.van), 
-                          str(obj.tot),
-                          obj.status.capitalize()])
-        return table
+    def _format_row(self, obj: Reservering) -> list[str]:
+        return [obj.nummer, 
+                obj.strfklant, 
+                obj.strfmerk, 
+                obj.strfmodel, 
+                str(obj.van), 
+                str(obj.tot), 
+                obj.status.capitalize()]
     
     def update(self, obj: Reservering | int, attr: str, value: Any) -> bool:
         return super().update(obj, attr, value)

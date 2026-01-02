@@ -269,15 +269,15 @@ class Reservering:
         return "lopend"
     
     @property
-    def fklant(self) -> str: 
+    def strfklant(self) -> str: 
         return self.klant.naam
     
     @property
-    def fmerk(self) -> str: 
+    def strfmerk(self) -> str: 
         return f"{self.voertuig.merk}"
     
     @property
-    def fmodel(self) -> str: 
+    def strfmodel(self) -> str: 
         return f"{self.voertuig.model}"
     
     @classmethod
