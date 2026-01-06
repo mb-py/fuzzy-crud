@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from datamodel import Particulier, Professioneel
+from datamodel import Particulier, Professioneel, BTW, RRN, VIN
 from datascrivener import KlantScribe, VoertuigScribe, ReserveringScribe
 from typing import Any
 from dataclasses import asdict
@@ -73,11 +73,18 @@ if __name__ == "__main__":
     print(f"Loaded {reserveringen.count} reserveringen")
     
 
-    for k, v in vars(voertuigen[0]).items():
+    '''for k, v in vars(voertuigen[0]).items():
         print(k, v)
 
     for k, v in asdict(voertuigen[0]).items():
         print(k, v)
+    '''
+
+    print(asdict(klanten[0]))
+    from dataclasses import fields
+
+    for f in fields(klanten[0]): 
+        print(f.type)
     
     '''
     for k in klanten.all:

@@ -9,6 +9,7 @@ from rapidfuzz import process, fuzz, utils
 import string
 import weakref
 from collections.abc import Iterator
+from dataclasses import fields, MISSING, asdict
 
 class Fuzzable[T]:
     """
@@ -249,6 +250,43 @@ class TypeScribe[T](ABC):
         Updates object. Returns boolean for validation.
         '''
         pass
+
+    #CREATE
+    def create_default(self, obj_type: type) -> dict[str, Any]:
+        """
+        Create a dictionary of default values for creating a new object.
+        Returns a dict with field names as keys and default values.
+        """
+        defaults = {}
+        
+        for f in fields(obj_type):
+            if f.name == 'nummer':  # Skip auto-generated fields
+                continue
+            
+            # Get default value
+            if f.default is not MISSING:
+                defaults[f.name] = f.default
+            elif f.default_factory is not MISSING:
+                try:
+                    defaults[f.name] = f.default_factory()
+                except:
+                    defaults[f.name] = None
+            else:
+                # Type-based defaults
+                if f.type is bool:
+                    defaults[f.name] = False
+                elif f.type is int:
+                    defaults[f.name] = 0
+                elif f.type is float:
+                    defaults[f.name] = 0.0
+                elif f.type is str:
+                    defaults[f.name] = ""
+                elif f.type is date:
+                    defaults[f.name] = date.today()
+                else:
+                    defaults[f.name] = None
+        
+        return defaults
         
 
 class KlantScribe(TypeScribe[Klant]):
@@ -286,20 +324,28 @@ class KlantScribe(TypeScribe[Klant]):
                 obj.gemeente]
     
     def update(self, obj: Klant | int, attr: str, value: Any) -> bool:
-        if isinstance(obj, int) and obj < self.count:
+        if isinstance(obj, int) and obj >= self.count:
+            raise IndexError("Index out of range")
+        elif isinstance(obj, int):
             obj = self[obj]
-        else:
-            raise IndexError
-        attr_type = get_type_hints(obj).get(attr)
-        if attr_type is None:
-            raise ValueError("attr not found")
-        if issubclass(attr_type, (int, BTW, RRN)) and not isinstance(value, attr_type):
-            value = attr_type(value)
+        if not hasattr(obj, attr):
+            raise ValueError(f"Failed to find attribute {attr}")
+        assert isinstance(obj, (Particulier, Professioneel))
         try:
+            if attr in ['huisnummer', 'postcode']:
+                value = int(value)
+            if attr == 'rijksregisternummer':
+                assert isinstance(obj, Particulier)
+                value = RRN(value) if RRN.isvalid(value) else RRN('',obj.geboortedatum,obj.geslacht=="M")
+            if attr == 'btwnummer':
+                assert isinstance(obj, Professioneel)
+                value = BTW(value) if BTW.isvalid(value) else BTW('')
+            if attr == 'geboortedatum':
+                value = date.fromisoformat(value)
             setattr(obj, attr, value)
-            return True #success
-        except:
-            raise ValueError("incorrect value")
+            return True
+        except Exception as e:
+            raise ValueError(f"Failed to set attribute: {e}")
 
 class VoertuigScribe(TypeScribe[Voertuig]):
     """Scribe for managing Voertuigen."""
@@ -332,22 +378,34 @@ class VoertuigScribe(TypeScribe[Voertuig]):
                 obj.status.capitalize()]
     
     def update(self, obj: Voertuig | int, attr: str, value: Any) -> bool:
+        """Update a field with validation"""
         if isinstance(obj, int) and obj < self.count:
             obj = self[obj]
-        else:
-            raise IndexError
-        attr_type = get_type_hints(obj).get(attr)
+        elif isinstance(obj, int):
+            raise IndexError("Index out of range")
+                
+        attr_type = get_type_hints(type(obj)).get(attr)
         if attr_type is None:
-            raise ValueError("attr not found")
-        if issubclass(attr_type, bool) and isinstance(value, str):
-            value = bool(value.capitalize().strip() == "True")
-        if issubclass(attr_type, (float, VIN, Bouwjaar)) and not isinstance(value, attr_type):
-            value = attr_type(value)
+            raise ValueError(f"Attribute '{attr}' not found")
+        
+        # Type conversion
+        if not isinstance(value, attr_type):
+            try:
+                if attr_type is bool:
+                    if isinstance(value, str):
+                        value = value.lower() in ('true', '1', 'yes')
+                elif issubclass(attr_type, (float, VIN, Bouwjaar)):
+                    value = attr_type(value)
+            except (ValueError, TypeError):
+                raise ValueError(f"Cannot convert to {attr_type.__name__}")
+        
         try:
             setattr(obj, attr, value)
-            return True #success
-        except:
-            raise ValueError("incorrect value")
+            # Update availability cache
+            self.refresh(all=False)
+            return True
+        except Exception as e:
+            raise ValueError(f"Failed to set attribute: {e}")
 
 class ReserveringScribe(TypeScribe[Reservering]):
     """Scribe for managing Reserveringen with dependency mapping."""
@@ -399,4 +457,38 @@ class ReserveringScribe(TypeScribe[Reservering]):
                 obj.status.capitalize()]
     
     def update(self, obj: Reservering | int, attr: str, value: Any) -> bool:
-        return super().update(obj, attr, value)
+        """Update a field with validation"""
+        if isinstance(obj, int) and obj < self.count:
+            obj = self[obj]
+        elif isinstance(obj, int):
+            raise IndexError("Index out of range")
+        
+        from typing import get_type_hints
+        from datetime import date
+        
+        attr_type = get_type_hints(type(obj)).get(attr)
+        if attr_type is None:
+            raise ValueError(f"Attribute '{attr}' not found")
+        
+        # Special handling for date fields
+        if attr in ('van', 'tot') or 'date' in str(attr_type):
+            if isinstance(value, str):
+                try:
+                    value = date.fromisoformat(value)
+                except ValueError:
+                    raise ValueError(f"Invalid date format. Use YYYY-MM-DD")
+        
+        # Validate date logic
+        if attr == 'van' and hasattr(obj, 'tot'):
+            if isinstance(value, date) and value > obj.tot:
+                raise ValueError("Start date cannot be after end date")
+        elif attr == 'tot' and hasattr(obj, 'van'):
+            if isinstance(value, date) and value < obj.van:
+                raise ValueError("End date cannot be before start date")
+        
+        try:
+            setattr(obj, attr, value)
+            self.refresh(all=False)
+            return True
+        except Exception as e:
+            raise ValueError(f"Failed to set attribute: {e}")

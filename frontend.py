@@ -10,62 +10,134 @@ from rich.text import Text
 from rich.live import Live
 from rich.box import ROUNDED
 
-# Importing the keyboard listener
 import pygetwindow as gw
 import keyboard
 
-# Assuming datascrivener.py is in the same directory
-from hawktui import DataTable, commandField, inspectObject
-from datastore import klanten, read_data
+from hawktui import commandField, ObjectEditor, DataTable
+from datastore import klanten, voertuigen, reserveringen, read_data
+from appstate import AppState, AppMode, ModeKeyBindings
+from datamodel import Reservering, Particulier, Professioneel, Voertuig
+
 read_data()
 
 class TerminalApp:
     def __init__(self, window):
         self.console = Console(color_system='256', stderr=True)
-        # Jank shit
         self.window = window
         self.running = True
         self.live = None
         self.logs: List[Text] = []
         self.is_hooked = False
-
-        # Layout
-        self.layout = None
-        self.title = "Fuzzy CRUD"
-        self.subtitle = "Data Overzicht"
-
-        # Initialize the Scribe
-        self.scribe = klanten
-        self.editor = inspectObject(klanten)
-        self.inspect = False
-
-        # Focus management: "input", "sidepanel", "datatable"
-        self.focus = "input"
-
-        #Input Parameters
-        self.cmd = commandField(self.scribe)
-
-        @self.cmd.on("changed")
-        def update_suggestion(value: str | None):
-            if not self.inspect:
-                query = value if value else  ""
-                suggestion = self.scribe.get_suggestion(query)
-                self.cmd.suggest(suggestion)
         
-        # Sidepanel Parameters
-        self.sidepanel_open = False
-        self.menu_items = ["Dashboard", "Klanten", "Create", "Edit"]
-        self.menu_idx = 1 # "Klanten"
-
-        # DataTable parameters
-        self.table = DataTable(self.console, self.scribe)
-
+        # State management
+        self.state = AppState()
+        self.state.active_scribe = klanten
+        
+        # Layout
+        self.layout: Layout | None = None
+        self.title = "Fuzzy CRUD"
+        
+        # Components
+        self.cmd = commandField(self.state.active_scribe)
+        self.editor = ObjectEditor(self.state.active_scribe)
+        self.table = DataTable(self.console, self.state.active_scribe)
+        self.selection_table: DataTable | None = None
+        
+        # Setup event handlers
+        self._setup_command_handlers()
+    
+    def _setup_command_handlers(self):
+        """Setup command field event handlers"""
+        
+        @self.cmd.on("changed")
+        def on_query_changed(value: str | None):
+            if self.state.mode == AppMode.SEARCHING or self.state.mode == AppMode.SELECTING:
+                query = value if value else ""
+                delta = time.perf_counter_ns()
+                
+                # Use appropriate scribe for search
+                scribe = self.state.selection_scribe if self.state.mode == AppMode.SELECTING else self.state.active_scribe
+                assert scribe is not None
+                suggestion = scribe.get_suggestion(query)
+                
+                delta = time.perf_counter_ns() - delta
+                self.add_log(f"Query: {delta/1000:.1f}μs")
+                self.cmd.suggest(suggestion)
+                
+                if self.layout:
+                    self.update_display()
+        
+        @self.cmd.on("submitted")
+        def on_submit(value: str | None):
+            if self.state.mode == AppMode.SEARCHING:
+                self.state.enter_browsing()
+            elif self.state.mode in (AppMode.EDITING, AppMode.CREATING):
+                data = value if value else ""
+                if self.editor.validate_and_submit(data):
+                    if self.editor.field_idx >= len(self.editor.names):
+                        # Done editing/creating
+                        if self.state.mode == AppMode.CREATING:
+                            self._finalize_creation()
+                        self.state.enter_browsing()
+                    else:
+                        self.editor.move_next()
+                    self.cmd.clear()
+                else:
+                    self.add_log(f"Invalid value for {self.editor.current_field_name}")
+            
+            if self.layout:
+                self.update_display()
+        
+        @self.cmd.on("accepted")
+        def on_accept(value: str | None):
+            if self.state.mode in (AppMode.EDITING, AppMode.CREATING):
+                if value:
+                    self.editor.validate_and_submit(value)
+                self.editor.move_next()
+                self.cmd.clear()
+                if self.editor.field_idx >= len(self.editor.names):
+                    if self.state.mode == AppMode.CREATING:
+                        self._finalize_creation()
+                    self.state.enter_browsing()
+            
+            if self.layout:
+                self.update_display()
+    
+    def _finalize_creation(self):
+        """Create the new object and add it to the scribe"""
+        assert self.state.active_scribe is not None
+        try:
+            # Build kwargs from editor values
+            kwargs = {}
+            for i, name in enumerate(self.editor.names):
+                value_str = self.editor.values[i]
+                if value_str:
+                    # Try to convert to appropriate type
+                    value = self.editor._convert_value(value_str, self.editor.types[i])
+                    kwargs[name] = value
+            
+            # Create the object
+            if self.editor.obj_type:
+                new_obj = self.editor.obj_type(**kwargs)
+                self.state.active_scribe.add(new_obj)
+                self.add_log(f"Created new {self.editor.obj_type.__name__}")
+                self.state.active_scribe.refresh(all=True)
+        except Exception as e:
+            self.add_log(f"Error creating object: {e}")
+    
     def add_log(self, message: str):
-        self.logs.append(Text.assemble((f"[{datetime.now().strftime('%H:%M')}] ", "dim"), (message)))
-        if len(self.logs) > 4: self.logs.pop(0)
-
+        """Add a log message"""
+        self.logs.append(
+            Text.assemble(
+                (f"[{datetime.now().strftime('%H:%M')}] ", "dim"),
+                (message)
+            )
+        )
+        if len(self.logs) > 4:
+            self.logs.pop(0)
+    
     def make_layout(self) -> Layout:
-        """Define the application layout structure."""
+        """Create the application layout"""
         layout = Layout(name="root")
         layout.split(
             Layout(name="header", size=3),
@@ -74,190 +146,239 @@ class TerminalApp:
             Layout(name="input_area", size=3),
             Layout(name="footer", size=1),
         )
-
+        
+        sidepanel_size = 25 if self.state.sidepanel_open else 3
         layout["body"].split_row(
-            Layout(name="sidepanel", size=25 if self.sidepanel_open else 3),
+            Layout(name="sidepanel", size=sidepanel_size),
             Layout(name="datatable", ratio=1),
         )
-
+        
         return layout
-
+    
     def header(self) -> Panel:
-        """Create the top header bar."""
+        """Create header panel"""
         grid = Table.grid(expand=True)
         grid.add_column(justify="left", ratio=1)
         grid.add_column(justify="right")
         
         header_text = Text()
         header_text.append(f" {self.title}", style="bold white")
-        if self.subtitle:
-            header_text.append(f" — {self.subtitle}", style="bold bright_black")
-            
+        
+        # Add mode indicator
+        mode_name = self.state.mode.name.title()
+        header_text.append(f" — {mode_name}", style="bold bright_black")
+        
+        # Add scribe name
+        scribe_name = self.state.active_scribe.__class__.__name__.replace("Scribe", "")
+        header_text.append(f" / {scribe_name}", style="bright_black")
+        
         grid.add_row(
             header_text,
             Text(datetime.now().strftime("%H:%M:%S"), style="bright_black"),
         )
         return Panel(grid, style="bright_black", box=ROUNDED)
-
+    
     def sidepanel(self) -> Panel:
-        if not self.sidepanel_open:
+        """Create sidepanel content"""
+        if not self.state.sidepanel_open:
             return Panel("")
         
-        if self.inspect == 0:
-            return self.menu()
-        
-        if self.inspect != 0:
-            return self.editor.compose(edit=True)
+        if self.state.mode == AppMode.EDITING:
+            return self.editor.compose("Edit")
+        elif self.state.mode == AppMode.CREATING:
+            return self.editor.compose("Create")
         
         return Panel("")
     
-    def menu(self) -> Panel:
-        menu = Text()      
-        for i, item in enumerate(self.menu_items):
-            # Highlight logic
-            is_selected = (i == self.menu_idx)
-            style = "dim white"
-            
-            if self.focus == "sidepanel":  
-                if is_selected:
-                    style = "reverse"
-                else:
-                    style = "bold white"
-            
-            prefix = " > " if is_selected else "   "
-            menu.append(f"{prefix}{item.ljust(18)}\n", style=style)
-        return Panel(menu, title="[bold]Menu[/]", border_style="bright_black" if self.focus != "sidepanel" else "blue", box=ROUNDED)
-
-    def datatable(self) -> Panel:
-        f = True if self.focus == 'datatable' else False
-        return self.table.compose(focused=f)
-
-    def input_field(self) -> Panel:
-        return self.cmd.compose(focused=True, placeholder="Fuzzy Search")
-
-    def footer(self) -> Text:
-        footer = Text(justify="center")
-        hints = []
-        if self.focus == "input" and not self.inspect:
-            hints = [
-                ("ENTER", "Focus Table"), 
-                ("TAB", "Autocomplete"), 
-                ("ESC", "Quit")
-            ]
-        if self.focus == "input" and self.inspect:
-            hints = [
-                ("ENTER", "Enter Data"), 
-                ("TAB", "Skip Field"), 
-                ("ESC", "Quit")
-            ]
-        if self.focus == "datatable":
-            hints = [
-                ("m", "Open Menu"), 
-                ("j", "Cursor Down"), 
-                ("k", "Cursor Up"), 
-                ("e", "Edit"), 
-                ("s", "Select"), 
-                ("d", "Delete"), 
-                ("c", "Create"), 
-                ("f", "Fuzzy Search"), 
-                ("ESC", "Quit")
-            ]
-        for key, desc in hints:
-            footer.append(f" {key} ", style="bold white")
-            footer.append(f" {desc}  ", style="dim")
-        return footer
-
-    def handle_enter(self):
-        edit = self.editor
-        if self.focus == "input" and self.sidepanel_open and self.inspect:
-            pass
-        elif self.focus == "input":
-            self.focus = "datatable"
-
-    def cycle_inspect(self, enter: bool):
-        edit = self.editor
-        name = edit.fields[edit.field_idx]
-        if name == "Exit":
-            self.sidepanel_open = False
-            self.inspect = False
-            self.focus = "datatable"
-        elif self.input_text:
-            setattr(edit.obj, name, self.input_text)
-            edit.field_idx = (edit.field_idx + 1) % len(edit.fields)
-            self.input_text = ""
-            self.suggestion_text = f" {name.capitalize()}:"
-
-    def on_key_event(self, event: keyboard.KeyboardEvent):
-        if event.event_type != keyboard.KEY_DOWN:
-            return False # Suppress everything while focused
+    def datatable_panel(self) -> Panel:
+        """Create datatable panel"""
+        if self.state.mode == AppMode.SELECTING:
+            # Show selection table
+            if self.selection_table:
+                title_suffix = f"Select {self.state.selecting_for}"
+                return self.selection_table.compose(focused=True, title_suffix=title_suffix)
         
-        key = event.name
-        if key == 'esc':
-            self.running = False
+        return self.table.compose(focused=self.state.is_table_focused)
+    
+    def input_field(self) -> Panel:
+        """Create input field panel"""
+        placeholder = "Fuzzy Find"
+        
+        if self.state.mode in (AppMode.EDITING, AppMode.CREATING):
+            placeholder = self.editor.current_value
+            if hasattr(self.editor.current_value, 'uid'):
+                placeholder = getattr(self.editor.current_value, 'uid')
+            placeholder = str(placeholder)
+        
+        return self.cmd.compose(focused=self.state.is_input_focused, placeholder=placeholder)
+    
+    def footer(self) -> Text:
+        """Create footer with keybindings"""
+        footer = Text(justify="center")
+        bindings = ModeKeyBindings.get_bindings(self.state.mode)
+        
+        for binding in bindings:
+            footer.append(f" {binding.key} ", style="bold white")
+            footer.append(f" {binding.description}  ", style="dim")
+        
+        return footer
+    
+    def on_key_event(self, event: keyboard.KeyboardEvent) -> bool:
+        """Handle keyboard events based on current mode"""
+        if event.event_type != keyboard.KEY_DOWN:
             return False
         
-        key_name = event.name
-        edit = self.editor
-
-        # Check for Quit
-        if key_name == 'esc':
-            self.running = False
-            return
+        key = event.name
+        if not key:
+            return False
+        
         try:
-            # Context: Input Field
-            if self.focus == "input":
-                self.cmd.key_event(event)
+            # Handle ESC - universal back/cancel
+            if key == 'esc':
+                self._handle_escape()
+                return False
             
-            # Context: DataTable
-            elif self.focus == "datatable":
-                selected_row: int = self.table.cursor_index
-                if key_name == 'm':
-                    self.sidepanel_open = True
-                    self.inspect = 0
-                    self.focus = "sidepanel"
-                elif key_name == 'e':
-                    self.editor.point(selected_row)
-                    self.editor.compose(edit=True)
-                    self.sidepanel_open = True
-                    self.inspect = True
-                    self.focus = "input"
-                    self.cmd.clear()
-                    self.cmd.suggest(f" {edit.fields[edit.field_idx].capitalize()}:")
-                elif key_name == 'j' or key_name == 'down':
-                    #self.selected_row_idx = min(self.selected_row_idx + 1, self.scribe.count - 1)
-                    self.table.cusor_down()
-                elif key_name == 'k' or key_name == 'up':
-                    #self.selected_row_idx = max(self.selected_row_idx - 1, 0)
-                    self.table.cursor_up()
-                elif key_name == 'f':
-                    self.focus = "input"
-                elif key_name == 'space':
-                    self.sidepanel_open = not self.sidepanel_open
+            # Route to mode-specific handlers
+            if self.state.mode == AppMode.BROWSING:
+                self._handle_browsing_keys(key)
+            elif self.state.mode == AppMode.SEARCHING:
+                self._handle_searching_keys(key, event)
+            elif self.state.mode in (AppMode.EDITING, AppMode.CREATING):
+                self._handle_editing_keys(key, event)
+            elif self.state.mode == AppMode.SELECTING:
+                self._handle_selecting_keys(key)
+            
+            if self.layout:
+                self.update_display()
+        
         except Exception as e:
             self.add_log(f"Error: {e}")
-
-        return False
-
-    def update_display(self, layout: Layout):
-        """Map components to layout slots."""
-        layout["sidepanel"].size = 25 if self.sidepanel_open else 3
-        layout["header"].update(self.header())
-        layout["sidepanel"].update(self.sidepanel())
-        layout["datatable"].update(self.datatable())
-        layout["input_area"].update(self.input_field())
-        layout["footer"].update(self.footer())
         
+        return False
+    
+    def _handle_escape(self):
+        """Handle ESC key"""
+        if self.state.mode == AppMode.SELECTING:
+            self.state.exit_selecting()
+            self.selection_table = None
+        elif self.state.mode in (AppMode.EDITING, AppMode.CREATING, AppMode.SEARCHING):
+            self.state.enter_browsing()
+            self.cmd.clear()
+        else:
+            self.running = False
+    
+    def _handle_browsing_keys(self, key: str):
+        """Handle keys in browsing mode"""
+        if key == 'f':
+            self.state.enter_searching()
+            self.cmd.clear()
+        elif key == 'j' or key == 'down':
+            self.table.cursor_down()
+        elif key == 'k' or key == 'up':
+            self.table.cursor_up()
+        elif key == 'e':
+            # Edit selected item
+            self.editor.start_editing(self.table.cursor_index)
+            self.state.enter_editing(self.table.cursor_index)
+            self.cmd.clear()
+        elif key == 'c':
+            # Create new item
+            obj_type = self._get_create_type()
+            if obj_type:
+                self.editor.start_creating(obj_type)
+                self.state.enter_creating(obj_type)
+                self.cmd.clear()
+        elif key == 'd':
+            # Delete (placeholder)
+            self.add_log("Delete not implemented yet")
+    
+    def _handle_searching_keys(self, key: str, event: keyboard.KeyboardEvent):
+        """Handle keys in searching mode"""
+        if key in ('enter', 'tab', 'backspace', 'space') or len(key) == 1:
+            self.cmd.key_event(event)
+    
+    def _handle_editing_keys(self, key: str, event: keyboard.KeyboardEvent):
+        """Handle keys in editing/creating mode"""
+        if key == 's' and self.editor.needs_selection():
+            # Enter selection mode
+            field_name = self.editor.current_field_name
+            if field_name == 'klant':
+                self.state.enter_selecting('klant', klanten, self.state.mode)
+                self.selection_table = DataTable(self.console, klanten)
+                klanten.refresh(all=True)
+            elif field_name == 'voertuig':
+                self.state.enter_selecting('voertuig', voertuigen, self.state.mode)
+                self.selection_table = DataTable(self.console, voertuigen)
+                voertuigen.refresh(all=True)
+            self.cmd.clear()
+        elif key in ('enter', 'tab', 'backspace', 'space') or len(key) == 1:
+            self.cmd.key_event(event)
+    
+    def _handle_selecting_keys(self, key: str):
+        """Handle keys in selecting mode"""
+        if not self.selection_table:
+            return
+        
+        if key == 's':
+            # Select current item
+            selected = self.selection_table.get_selected()
+            if selected and self.state.selecting_for:
+                self.editor.set_field_value(self.state.selecting_for, selected)
+                self.add_log(f"Selected {self.state.selecting_for}: {selected.uid}")
+                self.state.exit_selecting()
+                self.editor.move_next()
+                self.selection_table = None
+                self.cmd.clear()
+        elif key == 'j' or key == 'down':
+            self.selection_table.cursor_down()
+        elif key == 'k' or key == 'up':
+            self.selection_table.cursor_up()
+        elif key == 'f':
+            self.cmd.clear()
+    
+    def _get_create_type(self) -> type | None:
+        """Determine what type to create based on active scribe"""
+        if self.state.active_scribe is klanten:
+            # Could prompt for Particulier vs Professioneel
+            return Particulier
+        elif self.state.active_scribe is voertuigen:
+            return Voertuig
+        elif self.state.active_scribe is reserveringen:
+            return Reservering
+        return None
+    
+    def update_display(self):
+        """Update all layout components"""
+        if not self.layout:
+            return
+        
+        sidepanel_size = 25 if self.state.sidepanel_open else 3
+        self.layout["sidepanel"].size = sidepanel_size
+        
+        self.layout["header"].update(self.header())
+        self.layout["sidepanel"].update(self.sidepanel())
+        self.layout["datatable"].update(self.datatable_panel())
+        self.layout["input_area"].update(self.input_field())
+        self.layout["footer"].update(self.footer())
+        
+        # Update logs
         log_content = Text()
-        for l in self.logs: log_content.append(l); log_content.append("\n")
-        layout["logs"].update(Panel(log_content, title="Activity", border_style="bright_black", box=ROUNDED))
-
+        for log in self.logs:
+            log_content.append(log)
+            log_content.append("\n")
+        self.layout["logs"].update(
+            Panel(log_content, title="Activity", border_style="bright_black", box=ROUNDED)
+        )
+    
     def run(self):
-
+        """Main application loop"""
         self.layout = self.make_layout()
+        self.update_display()
+        
         try:
-            with Live(self.layout, refresh_per_second=10, screen=True, redirect_stdout=False) as self.live:
+            with Live(self.layout, refresh_per_second=20, screen=True, redirect_stdout=False) as self.live:
                 while self.running:
-                    # DYNAMIC HOOKING BASED ON WINDOW FOCUS
+                    # Dynamic window focus detection
                     is_active = (gw.getActiveWindow() == self.window)
                     if is_active and not self.is_hooked:
                         keyboard.hook(self.on_key_event, suppress=True)
@@ -265,13 +386,13 @@ class TerminalApp:
                     elif not is_active and self.is_hooked:
                         keyboard.unhook_all()
                         self.is_hooked = False
-                    self.update_display(self.layout)
+                    
+                    self.update_display()
                     time.sleep(0.05)
         finally:
             keyboard.unhook_all()
 
 if __name__ == "__main__":
-    import pygetwindow as gw
     terminal = None
     while terminal is None:
         terminal = gw.getActiveWindow()

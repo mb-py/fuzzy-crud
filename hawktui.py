@@ -1,25 +1,21 @@
 import time
-from datetime import datetime
-from typing import List, Callable
+from datetime import datetime, date
+from typing import List, Callable, Any
+from dataclasses import fields, MISSING
 
 from rich.console import Console, Group, group
-from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.live import Live
-from rich.box import ROUNDED, SIMPLE
+from rich.box import ROUNDED
 from rich.rule import Rule
-from rich.style import Style
 
-# Importing the keyboard listener
-import pygetwindow as gw
 import keyboard
 from typing import Literal
 from datascrivener import TypeScribe
-from dataclasses import fields
+from datamodel import BTW, RRN, VIN
 
-EventTypes = Literal["changed", "submitted", "accessed"]
+EventTypes = Literal["changed", "submitted", "accepted"]
 
 class commandField():
     def __init__(self, scribe: TypeScribe):
@@ -29,7 +25,7 @@ class commandField():
         self._subscribers: dict[str, list[Callable[[str | None], None]]] = {
                 "changed": [],
                 "submitted": [],
-                "accessed": []
+                "accepted": []
         }
     # Standard property logic
     @property
@@ -40,12 +36,12 @@ class commandField():
     def input_text(self, new_input: str):
         if self._data != new_input:
             self._data = new_input
-            self._emit("changed", self._data)
+            self._emit("changed")
 
-    def _emit(self, event_name: EventTypes, data: str | None):
+    def _emit(self, event_name: EventTypes):
         """Internal helper to fire all callbacks for a specific channel."""
         for callback in self._subscribers.get(event_name, []):
-            callback(data)
+            callback(self._data)
 
     # --- The Decorator Factory ---
     def on(self, event_name: EventTypes):
@@ -69,8 +65,9 @@ class commandField():
             self.input_text = data + " " 
         elif key == 'tab' and self.suggestion_text is not None:
             self.input_text = self.suggestion_text
+            self._emit("accepted")
         elif key == 'enter':
-            self._emit("submitted", self._data)
+            self._emit("submitted")
 
     def clear(self):
         self.input_text = ""
@@ -112,60 +109,35 @@ class commandField():
 
         return Panel(content, title=f"[b {cursor_style}]Command Input[/]", border_style=border_style, box=ROUNDED) 
 
-class inspectObject():
-    def __init__(self, scribe: TypeScribe):
-        self.scribe = scribe
-        self.obj = self.scribe[0]
-        self.obj_type = self.obj.__class__
-        self.fields: list[str] = []
-        self.field_idx = 0
-    
-    def point(self, i):
-        self.field_idx = 0
-        self.fields.clear()
-        self.obj = self.scribe[i]
-        self.obj_type = self.obj.__class__
-
-    def compose(self, edit: bool) -> Panel:
-        self.fields.clear()
-        title = "Edit" if edit else "Create"
-        @group()
-        def make_stuff():
-            obj_fields = fields(self.obj_type)        
-            idx = 0
-            for f in obj_fields:
-                # Skip internal or complex calculated fields if necessary
-                if f.name in ["uid"]:
-                    continue
-                self.fields.append(f.name)
-                val = str(getattr(self.obj, f.name)) if self.obj else ""
-                selected = "reverse" if self.field_idx == idx else "bold white"
-                yield Rule(f"{f.name.title()}", style="bold white")
-                yield Text(f"{val}\n", style=selected)
-                idx += 1
-            self.fields.append("Exit")
-            selected = "cyan" if self.field_idx == idx else "bright_black"
-            yield Panel(Text(f"Return", style="bold white"), border_style=selected, box=ROUNDED)
-        return Panel(make_stuff(), title=f"[bold]{title} - {self.obj_type.__name__}[/]", border_style="blue", box=ROUNDED)
-
 class DataTable():
 
     def __init__(self, console: Console, scribe: TypeScribe):
         self.console = console
         self.scribe = scribe
-        self.cursor_index = 0
+        self.cursor_index = 0        
+        self._subscribers: dict[str, list[Callable[[str | None], None]]] = {
+                "timeit": [],
+                "submitted": [],
+                "accessed": []
+        }
 
-    def cusor_down(self):
+    def get_selected(self) -> Any:
+        """Get the currently selected object"""
+        if 0 <= self.cursor_index < self.scribe.count:
+            return self.scribe[self.cursor_index]
+        return None
+
+    def cursor_down(self):
         max_index = self.scribe.count - 1 if self.scribe.count > 0 else 0
         if self.cursor_index < max_index:
-            self.cursor_index = self.cursor_index + 1
+            self.cursor_index += 1
 
     def cursor_up(self):
         min_index = 0
         if self.cursor_index > min_index:
-            self.cursor_index = self.cursor_index - 1
+            self.cursor_index -= 1
         
-    def compose(self, focused:bool) -> Panel:
+    def compose(self, focused:bool, title_suffix: str = "") -> Panel:
         # --- Styling ---
         title_style = "white"  if focused else "bright_black"
         panel_style = "bright_black"
@@ -180,8 +152,8 @@ class DataTable():
         # --- Columns ---
         all_cols = self.scribe.get_columns()
         for col in all_cols:
-            r = 1 if col in ["Geslacht", "Huisnummer"] else 2 if col in ["Bouwjaar", "Prijs", "Postcode"] else 3 if col in ["BTW/RRN", "Gemeente", "Straat", "Merk", "Van", "Tot"] else 4
-            table.add_column(col, ratio=r, overflow="ellipsis")
+            width = 1 if col in ["Geslacht", "Huisnummer"] else 2 if col in ["Bouwjaar", "Prijs", "Postcode"] else 3 if col in ["BTW/RRN", "Gemeente", "Straat", "Merk", "Van", "Tot"] else 4
+            table.add_column(col, ratio=width, overflow="ellipsis")
         # Add the '...' trimming row at the top of the table
         if self.cursor_index > cursor_max_depth:
             table.add_row(*["..." for _ in all_cols], style="color(240)")
@@ -205,4 +177,224 @@ class DataTable():
         if self.cursor_index > table_max_depth: 
             self.cursor_index = table_max_depth
 
-        return Panel(table, title=f"[b {title_style}]DATATABLE[/] ({self.scribe.count})", border_style=panel_style, box=ROUNDED)
+        title_text = f"[b {title_style}]DATATABLE[/] ({self.scribe.count})"
+        if title_suffix:
+            title_text += f" - {title_suffix}"
+        
+        return Panel(table, title=title_text, border_style=panel_style, box=ROUNDED)
+    
+class ObjectEditor():
+    """Handles editing and creating objects with validation"""
+    def __init__(self, scribe: TypeScribe):
+        self.scribe = scribe
+        self.obj: Any = None
+        self.obj_type: type | None = None
+        self.names: list[str] = []
+        self.types: list[Any] = []
+        self.values: list[Any] = []
+        self.errors: list[str] = []  # Track validation errors
+        self.object_refs: dict[str, Any] = {} 
+        self.field_idx = 0
+        self.is_creating = False
+    
+    def start_editing(self, index: int):
+        """Initialize editor for editing an existing object"""
+        self.is_creating = False
+        self.obj = self.scribe[index]
+        self._initialize_fields()
+    
+    def start_creating(self, obj_type: type):
+        """Initialize editor for creating a new object"""
+        self.is_creating = True
+        self.obj_type = obj_type
+        self.obj = None
+        self.names.clear()
+        self.types.clear()
+        self.values.clear()
+        self.errors.clear()
+        self.object_refs.clear()
+        
+        # Get default values from dataclass fields
+        for f in fields(obj_type):
+            if f.name == 'nummer':  # Skip auto-generated fields
+                continue
+            self.names.append(f.name)
+            self.types.append(f.type)
+            
+            # Get default value
+            if f.default is not MISSING:
+                self.values.append(f.default)
+            elif f.default_factory is not MISSING:
+                self.values.append("")
+            else:
+                self.values.append("")
+        
+        self.field_idx = 0
+    
+    def _initialize_fields(self):
+        """Initialize fields from existing object"""
+        if self.obj is None:
+            return
+        
+        self.obj_type = self.obj.__class__
+        assert self.obj_type is not None
+        self.names.clear()
+        self.types.clear()
+        self.values.clear()
+        self.errors.clear()
+        
+        for f in fields(self.obj):
+            if f.name == 'nummer':  # Skip auto-generated
+                continue
+            val = getattr(self.obj, f.name)
+            #strfval = str(val.uid if hasattr(val, 'uid') else val)
+            self.names.append(f.name)
+            self.types.append(f.type)
+            self.values.append(val)
+            self.errors.append("")
+        
+        self.field_idx = 0
+    
+    @property
+    def current_field_name(self) -> str:
+        """Get the name of the currently selected field"""
+        if 0 <= self.field_idx < len(self.names):
+            return self.names[self.field_idx]
+        return ""
+    
+    @property
+    def current_value(self) -> str:
+        """Get the current value as string"""
+        if 0 <= self.field_idx < len(self.values):
+            return self.values[self.field_idx]
+        return ""
+    
+    @property
+    def current_type(self) -> type | None:
+        """Get the type of the current field"""
+        if 0 <= self.field_idx < len(self.values):
+            return self.types[self.field_idx]
+        return None
+    
+    def needs_selection(self) -> bool:
+        """Check if current field needs object selection"""
+        field_name = self.current_field_name
+        return field_name in ('klant', 'voertuig')
+    
+    def move_next(self):
+        """Move to next field"""
+        max_index = len(self.names)
+        self.field_idx = (self.field_idx + 1 ) % max_index
+    
+    def move_prev(self):
+        """Move to previous field"""
+        max_index = len(self.names)
+        self.field_idx = (self.field_idx - 1 ) % max_index
+    
+    def validate_and_submit(self, data: str) -> bool:
+        """Validate and submit data for current field. Returns True if valid."""
+        idx = self.field_idx
+        if idx >= len(self.names):
+            return False
+        
+        field_type = self.types[idx]
+        field_name = self.names[idx]
+        
+        try:
+            if not self.is_creating:
+                self.scribe.update(self.obj, field_name, data)
+                # Get the updated value back
+                updated_value = getattr(self.obj, field_name)
+                self.values[idx] = updated_value
+            else:
+                self.values[idx] = data
+            self.errors[idx] = ""
+            return True
+            
+        except (ValueError, TypeError) as e:
+            # Store error
+            self.errors[idx] = f"Invalid {field_type.__name__} : {e}"
+            if data:
+                self.values[idx] = data
+            return False
+    
+    def _convert_value(self, value: str, target_type: type) -> Any:
+        """Convert string value to target type with validation"""
+        if target_type.__name__ in ['BTW', 'RRN', 'VIN', 'str']:
+            return target_type(value)
+        
+        if not value:
+            return None
+        
+        # Handle date types
+        if target_type is date or 'date' in str(target_type):
+            return date.fromisoformat(value)
+        
+        # Handle bool
+        if target_type is bool:
+            if value not in ['True', 'False']:
+                raise ValueError("Must be True or False")
+            return value == 'True'
+        
+        # Handle numeric types
+        if target_type in (int, float):
+            return target_type(value)
+        
+        # Default: keep as string
+        return value
+    
+    def set_field_value(self, field_name: str, value: Any):
+        """Directly set a field value (for object selection)"""
+        idx = self.names.index(field_name)
+        try:
+            if not self.is_creating:
+                # For editing, use scribe's update method with the actual object
+                self.scribe.update(self.obj, field_name, value)
+                self.values[idx] = value
+            else:
+                # For creating, store both the display value and object reference
+                self.values[idx] = value
+                self.object_refs[field_name] = value  # Store actual object for from_dict
+            self.errors[idx] = ""
+        except (ValueError, IndexError) as e:
+            self.errors[idx] = str(e) if str(e) else "Error setting value"
+
+    
+    def compose(self, title: str = "Edit") -> Panel:
+        """Render the editor panel"""
+        @group()
+        def display_fields():     
+            for i in range(len(self.names)):
+                name = self.names[i]
+                val = self.values[i]
+                err = self.errors[i]
+                
+                # Color coding
+                if err:
+                    color = "bold red"
+                else:
+                    color = "bold white"
+                
+                selected = f"r {color}" if self.field_idx == i else color
+                
+                yield Rule(f"{name.replace('_', ' ').title()}", style="bold white")
+                
+                if hasattr(val, 'uid') and not self.is_creating:
+                    display_text = f"{getattr(val, 'uid')}"
+                else:
+                    display_text = str(val) if val else "<empty>"
+
+                #if name in ('klant', 'voertuig') and not self.is_creating:
+                
+                yield Text(f"{display_text}", style=selected)
+                if err:
+                    yield Text(f"⚠ {err}", style="red")
+                yield Text("")
+        
+        obj_name = self.obj_type.__name__ if self.obj_type else "Object"
+        return Panel(
+            display_fields(), 
+            title=f"[bold]{title} - {obj_name}[/]", 
+            border_style="blue", 
+            box=ROUNDED
+        )
