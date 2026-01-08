@@ -7,13 +7,13 @@ from rich.console import Console, Group, group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.box import ROUNDED
+from rich.box import ROUNDED, SIMPLE, SQUARE, MINIMAL
 from rich.rule import Rule
 
 import keyboard
 from typing import Literal
 from datascrivener import TypeScribe
-from datamodel import BTW, RRN, VIN
+from datamodel import Particulier, Professioneel, Voertuig, Reservering, Klant, VoertuigCategorie, BTW, RRN, VIN, Bouwjaar
 
 EventTypes = Literal["changed", "submitted", "accepted"]
 
@@ -71,6 +71,7 @@ class commandField():
 
     def clear(self):
         self.input_text = ""
+        self.suggestion_text = ""
     
     def suggest(self, text: str | None):
         if text is not None:
@@ -143,7 +144,7 @@ class DataTable():
         panel_style = "bright_black"
         table_style = "bright_black"
         # --- Table ---
-        table = Table(expand=True, box=ROUNDED, border_style=table_style)
+        table = Table(expand=True, box=MINIMAL, border_style=table_style)
         # --- Table Size and Scrolling Parameters---
         table_max_size = self.console.size.height -19
         table_max_depth = self.scribe.count - 1 if self.scribe.count else 0
@@ -152,7 +153,16 @@ class DataTable():
         # --- Columns ---
         all_cols = self.scribe.get_columns()
         for col in all_cols:
-            width = 1 if col in ["Geslacht", "Huisnummer"] else 2 if col in ["Bouwjaar", "Prijs", "Postcode"] else 3 if col in ["BTW/RRN", "Gemeente", "Straat", "Merk", "Van", "Tot"] else 4
+            width = 4
+            if col in ["Geslacht", "Huisnummer"]:
+                width = 1 
+            if col in ["Bouwjaar", "Prijs", "Postcode", "Nummer"]:
+                width = 2
+            if col in ["BTW/RRN", "VIN", "Straat", "Merk", "Model", "Van", "Tot", "Status"]:
+                width = 3
+            if col in ["Klant"]:
+                width = 5
+
             table.add_column(col, ratio=width, overflow="ellipsis")
         # Add the '...' trimming row at the top of the table
         if self.cursor_index > cursor_max_depth:
@@ -177,11 +187,15 @@ class DataTable():
         if self.cursor_index > table_max_depth: 
             self.cursor_index = table_max_depth
 
-        title_text = f"[b {title_style}]DATATABLE[/] ({self.scribe.count})"
+        scribe_name = self.scribe.__class__.__name__.replace('Scribe', '')
+        filtered = '(All)' if self.scribe._active_filter is None else '(Filtered)'
+        hidden = len(self.scribe._hidden)
+        stats = f"{self.scribe.count} ({hidden} hidden)" if hidden > 0 else f"{self.scribe.count}"
+        title_text = f"[b {title_style}]{scribe_name}{filtered}[/]  - Showing {stats}"
         if title_suffix:
             title_text += f" - {title_suffix}"
         
-        return Panel(table, title=title_text, border_style=panel_style, box=ROUNDED)
+        return Panel(table, title=title_text, border_style=panel_style, box=SQUARE)
     
 class ObjectEditor():
     """Handles editing and creating objects with validation"""
@@ -196,40 +210,30 @@ class ObjectEditor():
         self.object_refs: dict[str, Any] = {} 
         self.field_idx = 0
         self.is_creating = False
+        self.is_editing_field = False
     
     def start_editing(self, index: int):
         """Initialize editor for editing an existing object"""
         self.is_creating = False
+        self.is_editing_field = False
         self.obj = self.scribe[index]
         self._initialize_fields()
     
     def start_creating(self, obj_type: type):
-        """Initialize editor for creating a new object"""
+        """Initialize editor by creating a new default object immediately"""
         self.is_creating = True
+        self.is_editing_field = False
         self.obj_type = obj_type
-        self.obj = None
-        self.names.clear()
-        self.types.clear()
-        self.values.clear()
-        self.errors.clear()
-        self.object_refs.clear()
         
-        # Get default values from dataclass fields
-        for f in fields(obj_type):
-            if f.name == 'nummer':  # Skip auto-generated fields
-                continue
-            self.names.append(f.name)
-            self.types.append(f.type)
-            
-            # Get default value
-            if f.default is not MISSING:
-                self.values.append(f.default)
-            elif f.default_factory is not MISSING:
-                self.values.append("")
-            else:
-                self.values.append("")
-        
-        self.field_idx = 0
+        # Create the actual object
+        # Add it to the scribe immediately
+        try:
+            self.obj = self.scribe.create_default(self.obj_type)
+            assert self.obj is not None
+            self._initialize_fields()
+            self.field_idx = 0 
+        except Exception as e:
+            raise ValueError(f"Failed to create default object: {e}")
     
     def _initialize_fields(self):
         """Initialize fields from existing object"""
@@ -285,81 +289,92 @@ class ObjectEditor():
         """Move to next field"""
         max_index = len(self.names)
         self.field_idx = (self.field_idx + 1 ) % max_index
+        self.is_editing_field = False
     
     def move_prev(self):
         """Move to previous field"""
         max_index = len(self.names)
         self.field_idx = (self.field_idx - 1 ) % max_index
+        self.is_editing_field = False
+
+    def start_field_edit(self):
+        """Start editing the current field (will transfer focus to command field)"""
+        self.is_editing_field = True
+    
+    def finish_field_edit(self):
+        """Finish editing the current field"""
+        self.is_editing_field = False
+    
+    def can_change_type(self) -> bool:
+        """Check if the current object type can be changed (only during creation)"""
+        if not self.is_creating:  # Can ONLY change type when creating
+            return False
+        # Can change between Particulier/Professioneel for Klanten
+        if self.obj_type in (Particulier, Professioneel):
+            return True
+        return False
+    
+    def get_alternate_types(self) -> list[type]:
+        """Get list of alternate types for current object"""
+        if self.obj_type in (Particulier, Professioneel):
+            return [Particulier, Professioneel]
+        return []
+    
+    def change_type(self, direction: int):
+        """Change object type (for creation only). Direction: -1 for left/h, +1 for right/l"""
+        if not self.can_change_type():
+            return
+        
+        alternates = self.get_alternate_types()
+        if not alternates or self.obj_type not in alternates:
+            return
+        
+        current_idx = alternates.index(self.obj_type)
+        new_idx = (current_idx + direction) % len(alternates)
+        new_type = alternates[new_idx]
+        
+        if new_type != self.obj_type:
+            if self.obj is not None:
+                self.scribe.remove(self.obj)
+                self.scribe.refresh(all=False)
+            try:
+                self.obj = self.scribe.create_default(new_type)
+                assert self.obj is not None
+                self._initialize_fields()
+                self.field_idx = 0 
+            except Exception as e:
+                # Failed to create new type
+                self.obj = None
+    
+    def cancel_creation(self):
+        """Remove the created object if canceling during creation"""
+        if self.is_creating and self.obj is not None:
+            self.scribe.remove(self.obj)
+            self.scribe.refresh(all=False)
+        self.is_creating = False
     
     def validate_and_submit(self, data: str) -> bool:
         """Validate and submit data for current field. Returns True if valid."""
         idx = self.field_idx
-        if idx >= len(self.names):
+        if idx < 0 or idx >= len(self.names):
             return False
-        
-        field_type = self.types[idx]
         field_name = self.names[idx]
-        
         try:
-            if not self.is_creating:
-                self.scribe.update(self.obj, field_name, data)
-                # Get the updated value back
-                updated_value = getattr(self.obj, field_name)
-                self.values[idx] = updated_value
-            else:
-                self.values[idx] = data
+            # Always use update method (same for creating and editing)
+            self.scribe.update(self.obj, field_name, data)
+            
+            # Get the updated value back
+            updated_value = getattr(self.obj, field_name)
+            self.values[idx] = updated_value
             self.errors[idx] = ""
             return True
-            
         except (ValueError, TypeError) as e:
             # Store error
-            self.errors[idx] = f"Invalid {field_type.__name__} : {e}"
+            self.errors[idx] = str(e)
             if data:
                 self.values[idx] = data
             return False
-    
-    def _convert_value(self, value: str, target_type: type) -> Any:
-        """Convert string value to target type with validation"""
-        if target_type.__name__ in ['BTW', 'RRN', 'VIN', 'str']:
-            return target_type(value)
         
-        if not value:
-            return None
-        
-        # Handle date types
-        if target_type is date or 'date' in str(target_type):
-            return date.fromisoformat(value)
-        
-        # Handle bool
-        if target_type is bool:
-            if value not in ['True', 'False']:
-                raise ValueError("Must be True or False")
-            return value == 'True'
-        
-        # Handle numeric types
-        if target_type in (int, float):
-            return target_type(value)
-        
-        # Default: keep as string
-        return value
-    
-    def set_field_value(self, field_name: str, value: Any):
-        """Directly set a field value (for object selection)"""
-        idx = self.names.index(field_name)
-        try:
-            if not self.is_creating:
-                # For editing, use scribe's update method with the actual object
-                self.scribe.update(self.obj, field_name, value)
-                self.values[idx] = value
-            else:
-                # For creating, store both the display value and object reference
-                self.values[idx] = value
-                self.object_refs[field_name] = value  # Store actual object for from_dict
-            self.errors[idx] = ""
-        except (ValueError, IndexError) as e:
-            self.errors[idx] = str(e) if str(e) else "Error setting value"
-
-    
     def compose(self, title: str = "Edit") -> Panel:
         """Render the editor panel"""
         @group()
@@ -379,10 +394,10 @@ class ObjectEditor():
                 
                 yield Rule(f"{name.replace('_', ' ').title()}", style="bold white")
                 
-                if hasattr(val, 'uid') and not self.is_creating:
+                if hasattr(val, 'uid'):
                     display_text = f"{getattr(val, 'uid')}"
                 else:
-                    display_text = str(val) if val else "<empty>"
+                    display_text = str(val) if val else "<empty/false>"
 
                 #if name in ('klant', 'voertuig') and not self.is_creating:
                 
@@ -392,9 +407,79 @@ class ObjectEditor():
                 yield Text("")
         
         obj_name = self.obj_type.__name__ if self.obj_type else "Object"
+
         return Panel(
             display_fields(), 
             title=f"[bold]{title} - {obj_name}[/]", 
-            border_style="blue", 
-            box=ROUNDED
+            border_style="white", 
+            box=SQUARE
+        )
+    
+class MenuItem:
+    """A menu item with action"""
+    def __init__(self, label: str | None, action: Callable[[], None], is_separator: bool = False):
+        self.label = label
+        self.action = action
+        self.is_separator = is_separator
+
+class Menu:
+    """Main menu component"""
+    def __init__(self):
+        self.items: list[MenuItem] = []
+        self.selected_idx = 0
+    
+    def add_item(self, label: str, action: Callable[[], None]):
+        """Add a menu item"""
+        self.items.append(MenuItem(label, action))
+    
+    def add_separator(self, label: str | None = None):
+        """Add a visual separator"""
+        self.items.append(MenuItem(label, lambda: None, is_separator=True))
+    
+    def move_down(self):
+        """Move selection down, skipping separators"""
+        if self.selected_idx < len(self.items) - 1:
+            self.selected_idx += 1
+            # Skip separators
+            while self.selected_idx < len(self.items) and self.items[self.selected_idx].is_separator:
+                self.selected_idx += 1
+    
+    def move_up(self):
+        """Move selection up, skipping separators"""
+        if self.selected_idx > 0:
+            self.selected_idx -= 1
+            # Skip separators
+            while self.selected_idx >= 0 and self.items[self.selected_idx].is_separator:
+                self.selected_idx -= 1
+    
+    def execute_selected(self):
+        """Execute the currently selected menu item"""
+        if 0 <= self.selected_idx < len(self.items):
+            item = self.items[self.selected_idx]
+            if not item.is_separator:
+                item.action()
+    
+    def compose(self) -> Panel:
+        """Render the menu panel"""
+        @group()
+        def display_menu():
+            for i, item in enumerate(self.items):
+                if item.is_separator:
+                    yield Text("")
+                    if item.label:
+                        yield Rule(title=item.label, style="white")
+                    else:
+                        yield Rule(style="white")
+                else:
+                    is_selected = (i == self.selected_idx)
+                    style = "r bright_white" if is_selected else "white"
+                    prefix = "► " if is_selected else "  "
+                    yield Text(f"{prefix}{item.label}", style=style)
+        
+        border_style = "white"
+        return Panel(
+            display_menu(),
+            title="",
+            border_style=border_style,
+            box=SQUARE
         )

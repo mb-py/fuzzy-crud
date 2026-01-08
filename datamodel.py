@@ -2,14 +2,49 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar, Generator, Literal, Any, Self
 import numpy as np
+from enum import Enum
 
 # --- Field Type Definities (string logica?) en Aliases ---
 Genders = Literal["M", "V", "F"]
-VoertuigCategorie = Literal["M1", "N1"]
-'''
-Categorie M1: "ontworpen en gebouwd voor het vervoer van personen" = Personenauto, minibus, kampeerauto
-Categorie N1: "ontworpen en gebouwd voor het vervoer van goederen" = Lichte bedrijfswagen (lichter dan 3500 kg), bestelbusje
-'''
+
+class VoertuigCategorie(str, Enum):
+    M1 = "M1"  # Personenauto, minibus, kampeerauto
+    N1 = "N1"  # Bestelbus, lichte bedrijfswagen
+    
+    @property
+    def display_name(self) -> str:
+        """Human-readable name"""
+        return {
+            "M1": "Personenwagen",
+            "N1": "Bestelbus",
+            "M2": "Bus",
+            "N2": "Vrachtwagen",
+        }[self.value]
+    
+    @classmethod
+    def parse(cls, value: str) -> 'VoertuigCategorie':
+        """Parse from code (M1, N1) or display name (Personenwagen, Bestelbus)"""
+        value = value.strip().capitalize()
+        
+        # Try direct code match first
+        for cat in cls:
+            if cat.value == value:
+                return cat
+        
+        # Try display name match (case-insensitive)
+        display_map = {
+            "Personenwagen": cls.M1,
+            "Bestebus": cls.N1,
+        }
+        
+        if value in display_map:
+            return display_map[value]
+        
+        raise ValueError(f"Invalid category: {value}. Use M1, N1, or Personenwagen, Bestelbus")
+    
+    def __str__(self) -> str:
+        """Display the friendly name by default"""
+        return self.display_name  
 
 class VIN(str):
     legal_characters: ClassVar[str] = '0123456789ABCDEFGHJKLMNPRSTUVWXYZ'
@@ -166,6 +201,10 @@ class Klant:
     def uid(self) -> str: 
         raise NotImplementedError
 
+    @property
+    def strftype(self) -> str:
+        return self.__class__.__name__.capitalize()
+    
 @dataclass
 class Particulier(Klant):
     geboortedatum: date
@@ -181,7 +220,7 @@ class Particulier(Klant):
     @property
     def uid(self) -> str: 
         return self.rijksregisternummer
-
+        
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         #maak een instance van JSON Object of Dict
@@ -235,10 +274,6 @@ class Voertuig:
     @property
     def status(self) -> str:
         return "beschikbaar" if self.beschikbaar else "gereserveerd"
-    
-    @property
-    def soort(self) -> str: 
-        return "bestelbusje" if self.categorie == "N1" else "personenwagen"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
@@ -247,6 +282,7 @@ class Voertuig:
         #hydrateer VIN, Bouwjaar fields
         d['chassisnummer'] = VIN(d.get('chassisnummer', ''))
         d['bouwjaar'] = Bouwjaar(d.get('bouwjaar', '1'))
+        d['categorie'] = VoertuigCategorie(d.get('categorie', 'M1'))
         return cls(**d)
 
 @dataclass
@@ -269,8 +305,16 @@ class Reservering:
         return "lopend"
     
     @property
+    def duur(self) -> int:
+        return (self.tot - self.van).days
+    
+    @property
     def strfklant(self) -> str: 
         return self.klant.naam
+    
+    @property
+    def strftype(self) -> str:
+        return self.klant.strftype
     
     @property
     def strfmerk(self) -> str: 

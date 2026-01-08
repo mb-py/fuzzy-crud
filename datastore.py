@@ -72,19 +72,7 @@ if __name__ == "__main__":
     print(f"Loaded {voertuigen.count} voertuigen")
     print(f"Loaded {reserveringen.count} reserveringen")
     
-
-    '''for k, v in vars(voertuigen[0]).items():
-        print(k, v)
-
-    for k, v in asdict(voertuigen[0]).items():
-        print(k, v)
-    '''
-
-    print(asdict(klanten[0]))
-    from dataclasses import fields
-
-    for f in fields(klanten[0]): 
-        print(f.type)
+    test_save()
     
     '''
     for k in klanten.all:

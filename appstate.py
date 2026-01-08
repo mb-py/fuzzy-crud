@@ -1,7 +1,7 @@
 from enum import Enum, auto
 from typing import Protocol, Any
 from dataclasses import dataclass, field
-from datascrivener import TypeScribe
+from datascrivener import TypeScribe, ObjectFilter
 
 class AppMode(Enum):
     """Application states with clear transitions"""
@@ -10,17 +10,18 @@ class AppMode(Enum):
     EDITING = auto()       # Editing an existing object
     CREATING = auto()      # Creating a new object
     SELECTING = auto()     # Selecting a related object (for Reservering)
+    MENU = auto()          # Navigating main menu
 
 @dataclass
 class AppState:
     """Centralized application state"""
-    mode: AppMode = AppMode.BROWSING
+    mode: AppMode = AppMode.MENU
     
     # Data management
     active_scribe: TypeScribe | None = None
     
     # UI state
-    sidepanel_open: bool = False
+    sidepanel_open: bool = True
     menu_idx: int = 0
     
     # Editing/Creating state
@@ -41,10 +42,6 @@ class AppState:
         self.selecting_for = None
         self.selection_scribe = None
         self.selection_return_mode = None
-    
-    def enter_searching(self):
-        """Transition to searching mode"""
-        self.mode = AppMode.SEARCHING
     
     def enter_editing(self, index: int):
         """Transition to editing mode"""
@@ -75,16 +72,27 @@ class AppState:
         self.selecting_for = None
         self.selection_scribe = None
         self.selection_return_mode = None
-    
+
+    def enter_menu(self):
+        """Transition to menu mode"""
+        self.mode = AppMode.MENU
+        self.sidepanel_open = True
+        self.menu_idx = 0   
+
     @property
     def is_input_focused(self) -> bool:
         """Check if input field should be focused"""
-        return self.mode in (AppMode.SEARCHING, AppMode.EDITING, AppMode.CREATING)
+        return self.mode == AppMode.SEARCHING
     
     @property
     def is_table_focused(self) -> bool:
         """Check if datatable should be focused"""
         return self.mode in (AppMode.BROWSING, AppMode.SELECTING)
+
+    @property
+    def is_sidepanel_focused(self) -> bool:
+        """Check if sidepanel should be focused"""
+        return self.mode in (AppMode.EDITING, AppMode.CREATING)
 
 class KeyHandler(Protocol):
     """Protocol for keyboard event handlers"""
@@ -107,41 +115,50 @@ class ModeKeyBindings:
         """Get keyboard bindings for a specific mode"""
         if mode == AppMode.BROWSING:
             return [
-                KeyBinding("f", "Fuzzy Search", None),
-                KeyBinding("j/↓", "Down", None),
-                KeyBinding("k/↑", "Up", None),
-                KeyBinding("e", "Edit", None),
-                KeyBinding("c", "Create", None),
-                KeyBinding("d", "Delete", None),
                 KeyBinding("m", "Menu", None),
-                KeyBinding("ESC", "Exit", None),
+                KeyBinding("f", "Fuzzy Find", None),
+                KeyBinding("e", "Edit", None),
+                KeyBinding("d", "Delete", None),
+                KeyBinding("c", "Create", None),
+                KeyBinding("j", "Cursor Down", None),
+                KeyBinding("k", "Cursor Up", None),
             ]
         elif mode == AppMode.SEARCHING:
             return [
-                KeyBinding("ENTER", "Focus Table", None),
-                KeyBinding("TAB", "Autocomplete", None),
-                KeyBinding("ESC", "Cancel", None),
+                KeyBinding("Enter", "Submit", None),
+                KeyBinding("Tab", "Autocomplete", None),
+                KeyBinding("Esc", "Cancel", None),
             ]
         elif mode == AppMode.EDITING:
             return [
-                KeyBinding("ENTER", "Next Field", None),
-                KeyBinding("TAB", "Skip Field", None),
-                KeyBinding("s", "Select Object", None),
-                KeyBinding("ESC", "Cancel", None),
+                KeyBinding("e", "Edit Field", None),
+                KeyBinding("j", "Cursor Down", None),
+                KeyBinding("k", "Cursor Up", None),
+                KeyBinding("l", "Change Type", None),
+                KeyBinding("Esc", "Return", None),
             ]
         elif mode == AppMode.CREATING:
             return [
-                KeyBinding("ENTER", "Next Field", None),
-                KeyBinding("TAB", "Skip Field", None),
-                KeyBinding("s", "Select Object", None),
-                KeyBinding("ESC", "Cancel", None),
+                KeyBinding("e", "Edit Field", None),
+                KeyBinding("j", "Cursor Down", None),
+                KeyBinding("k", "Cursor Up", None),
+                KeyBinding("l", "Change Type", None),
+                KeyBinding("Esc", "Return", None),
             ]
         elif mode == AppMode.SELECTING:
             return [
+                KeyBinding("f", "Fuzzy Find", None),
                 KeyBinding("s", "Select", None),
-                KeyBinding("j/↓", "Down", None),
-                KeyBinding("k/↑", "Up", None),
-                KeyBinding("f", "Filter", None),
-                KeyBinding("ESC", "Cancel", None),
+                KeyBinding("j", "Cursor Down", None),
+                KeyBinding("k", "Cursor Up", None),
+                KeyBinding("Esc", "Cancel", None),
+            ]
+        elif mode == AppMode.MENU:
+            return [
+                KeyBinding("f", "Fuzzy Find", None),
+                KeyBinding("j", "Down", None),
+                KeyBinding("k", "Up", None),
+                KeyBinding("Enter", "Select", None),
+                KeyBinding("Esc", "Close Menu", None),
             ]
         return []
