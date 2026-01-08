@@ -1,9 +1,8 @@
 import json
 from pathlib import Path
-from datamodel import Particulier, Professioneel, BTW, RRN, VIN
+from datamodel import Particulier, Professioneel
 from datascrivener import KlantScribe, VoertuigScribe, ReserveringScribe
 from typing import Any
-from dataclasses import asdict
 
 # Initialize the Scribes (Black Boxes)
 klanten = KlantScribe()
@@ -25,28 +24,19 @@ def read_data():
         except json.JSONDecodeError:
             return
 
-    klanten.clear()
     klant_data = json_data.get('particulier', []) + json_data.get('professioneel', [])
-    klanten.from_array(klant_data)
-
-    voertuigen.clear()
-    voertuigen.from_array(json_data.get('voertuigen', []))
+    voertuigen_data = json_data.get('voertuigen', [])
+    reserveringen_data = json_data.get('reserveringen', [])
     
+    klanten.clear()
+    klanten.from_array(klant_data)
+    voertuigen.clear()
+    voertuigen.from_array(voertuigen_data)
+
     reserveringen.clear()
-    reserveringen.from_array(
-        json_data.get('reserveringen', []), 
-        klanten.map, 
-        voertuigen.map
-    )
+    reserveringen.from_array(reserveringen_data, klanten.uids, voertuigen.uids)
 
 def save_data():
-    """
-    Placeholder for saving logic. 
-    In the future, Scribes could implement a to_dict() method for serialization.
-    """
-    pass
-
-def test_save():
     data = {
         "particulier": [vars(k) for k in klanten.all if isinstance(k, Particulier)],
         "professioneel": [vars(k) for k in klanten.all if isinstance(k, Professioneel)],
@@ -67,12 +57,15 @@ def test_save():
 
 if __name__ == "__main__":
     # Test load
+    DATA_FILE = "test.json"
     read_data()
     print(f"Loaded {klanten.count} klanten")
     print(f"Loaded {voertuigen.count} voertuigen")
     print(f"Loaded {reserveringen.count} reserveringen")
     
-    test_save()
+    for r in reserveringen.all:
+        print(r.klant.naam)
+    save_data()
     
     '''
     for k in klanten.all:

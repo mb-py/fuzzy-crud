@@ -14,20 +14,20 @@ import pygetwindow as gw
 import keyboard
 
 from hawktui import commandField, ObjectEditor, DataTable, Menu
-from datastore import klanten, voertuigen, reserveringen, read_data, test_save
+from datastore import klanten, voertuigen, reserveringen, read_data, save_data
 from appstate import AppState, AppMode, ModeKeyBindings
 from datamodel import Reservering, Particulier, Professioneel, Voertuig
-from datascrivener import TypeScribe, AttributeFilter, ClassFilter, InceptionAttributeFilter, InceptionClassFilter, RangeFilter, UIDFilter, CompoundFilter
+from datascrivener import TypeScribe, AttributeFilter, InceptionAttributeFilter, RangeFilter, UIDFilter, CompoundFilter
 
 # --- FILTERS OPDRACHT ---
 read_data()
-filter_particuliere_klanten = ClassFilter("Particulier")
-filter_zakelijke_klanten = ClassFilter("Professioneel")
+filter_particuliere_klanten = AttributeFilter("strftype", "Particulier")
+filter_zakelijke_klanten = AttributeFilter("strftype", "Professioneel")
 filter_personenwagens = AttributeFilter('categorie', 'M1')
 filter_bestelbusjes = AttributeFilter('categorie', 'N1')
 filter_beschikbare_wagens = AttributeFilter('beschikbaar', True)
-filter_particuliere_reserveringen = InceptionClassFilter('klant', 'Particulier')
-filter_zakelijke_reserveringen = InceptionClassFilter('klant', 'Professioneel')
+filter_particuliere_reserveringen = InceptionAttributeFilter('klant', "strftype", "Particulier")
+filter_zakelijke_reserveringen = InceptionAttributeFilter('klant', "strftype", "Professioneel")
 filter_reserveringen_op_duurtijd = RangeFilter('duur', start=4)
 
 filter_vrouwelijke_reserveringen = InceptionAttributeFilter('klant', 'geslacht', 'V')
@@ -105,7 +105,7 @@ class TerminalApp:
             menu.add_item("Voertuigen", lambda: self._switch_scribe(voertuigen, browse=False))
         menu.add_separator("Systeem")
         menu.add_item("Laad Data", lambda: read_data())
-        menu.add_item("Save Data", lambda: test_save())
+        menu.add_item("Save Data", lambda: save_data())
         menu.add_item("Sluit Programma", lambda: self.exit())
         
         return menu
@@ -402,12 +402,6 @@ class TerminalApp:
             self.table.cursor_down()
         elif key == 'k' or key == 'up':
             self.table.cursor_up()
-        elif key == 'h' or key == 'left':
-            # Cycle to previous subtype
-            self._change_scribe_filter(-1)
-        elif key == 'l' or key == 'right':
-            # Cycle to next subtype
-            self._change_scribe_filter(1)
         elif key == 'e':
             # Edit selected item
             self.editor.start_editing(self.table.cursor_index)
@@ -514,38 +508,6 @@ class TerminalApp:
                 self.selection_table.cursor_up()
             elif key == 'f':
                 self.editor.start_field_edit()
-
-    def _change_scribe_filter(self, direction: int):
-        """Change the active scribe filter/subtype. Direction: -1 for left/h, +1 for right/l"""
-        if not self.state.active_scribe:
-            return
-        
-        subtypes = self.state.active_scribe.get_filters()
-        if not subtypes or len(subtypes) <= 1:
-            return  # No filters to cycle through
-        
-        # Get current filter
-        current_filter = self.state.active_scribe._active_filter
-        
-        # Find current index
-        try:
-            current_idx = subtypes.index(current_filter)
-        except ValueError:
-            current_idx = 0
-        
-        # Calculate new index
-        new_idx = (current_idx + direction) % len(subtypes)
-        new_filter = subtypes[new_idx]
-        
-        # Apply the new filter
-        self.state.active_scribe.set_filter(new_filter)
-        
-        # Reset table cursor to top
-        self.table.cursor_index = 0
-        
-        # Log the change
-        filter_name = new_filter if new_filter else "All"
-        self.add_log(f"Filter: { self.state.active_scribe._active_filter.__class__.__name__}")
 
     def _get_create_type(self) -> type | None:
         """Determine what type to create based on active scribe"""

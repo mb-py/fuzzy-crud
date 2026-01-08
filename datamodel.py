@@ -1,50 +1,95 @@
 from dataclasses import dataclass, field
 from datetime import date
-from typing import ClassVar, Generator, Literal, Any, Self
+from typing import ClassVar, Generator, Any, Self
 import numpy as np
 from enum import Enum
 
-# --- Field Type Definities (string logica?) en Aliases ---
-Genders = Literal["M", "V", "F"]
-
-class VoertuigCategorie(str, Enum):
-    M1 = "M1"  # Personenauto, minibus, kampeerauto
-    N1 = "N1"  # Bestelbus, lichte bedrijfswagen
+# --- Field Type Definities (String-Fu) ---
+class Gender(str, Enum):
+    Male = "M"
+    Female = "V"
     
     @property
-    def display_name(self) -> str:
-        """Human-readable name"""
+    def description(self) -> str:
+        """Human-readable value"""
         return {
-            "M1": "Personenwagen",
-            "N1": "Bestelbus",
-            "M2": "Bus",
-            "N2": "Vrachtwagen",
+            "M": "Man",
+            "V": "Vrouw",
         }[self.value]
     
     @classmethod
-    def parse(cls, value: str) -> 'VoertuigCategorie':
-        """Parse from code (M1, N1) or display name (Personenwagen, Bestelbus)"""
-        value = value.strip().capitalize()
-        
-        # Try direct code match first
-        for cat in cls:
-            if cat.value == value:
-                return cat
-        
-        # Try display name match (case-insensitive)
-        display_map = {
-            "Personenwagen": cls.M1,
-            "Bestebus": cls.N1,
+    def parse(cls, data: str) -> Gender:
+        """Parse from strings"""
+        data = data.strip().capitalize()
+        # char match
+        for gender in cls:
+            if gender.value == data.upper():
+                return gender
+        # woord match
+        synonym = {
+            "Man": cls.Male,
+            "Male": cls.Male,
+            "Vrouw": cls.Female,
+            "Female": cls.Female,
         }
+        if data in synonym:
+            return synonym[data]
         
-        if value in display_map:
-            return display_map[value]
-        
-        raise ValueError(f"Invalid category: {value}. Use M1, N1, or Personenwagen, Bestelbus")
+        raise ValueError(f"Invalid attack-helicopter: {data}.")
     
     def __str__(self) -> str:
-        """Display the friendly name by default"""
-        return self.display_name  
+        """Display the description by default"""
+        return self.name 
+    
+class VoertuigCategorie(str, Enum):
+    M1 = "M1"   # Personenwagen <9 zitplaatsen
+    M2 = "M2"   # Bus MTM <5t
+    M3 = "M3"   # Bus MTM >5t
+    N1 = "N1"   # Lichte bedrijfsauto   MTM <3.5t
+    N2 = "N2"   # Zware bedrijfsauto    MTM <12t
+    N3 = "N3"   # Zware bedrijfsauto    MTM >12t
+    
+    @property
+    def description(self) -> str:
+        """Human-readable value"""
+        return {
+            "M1": "Personenwagen",
+            "M2": "Minibus",
+            "M3": "Bus",
+            "N1": "Bestelbus",
+            "N2": "Bakwagen",
+            "N3": "Vrachtwagen"
+            }[self.value]
+    
+    @classmethod
+    def parse(cls, data: str) -> VoertuigCategorie:
+        """Parse from code (M1, N1) or name (Personenwagen, Bestelbus) strings"""
+        data = data.strip().capitalize()
+        # code match
+        for categorie in cls:
+            if categorie.value == data.upper():
+                return categorie
+        # woord match
+        synonym = {
+            "Personenwagen": cls.M1,
+            "Personenauto": cls.M1,
+            "Auto": cls.M1,
+            "Minibus": cls.M2,
+            "Bus": cls.M3,
+            "Bestelwagen": cls.N1,
+            "Bestelbusje": cls.N1,
+            "Combi": cls.N1,
+            "Bakwagen": cls.N2,
+            "Vrachtwagen": cls.N3
+            }
+        if data in synonym:
+            return synonym[data]
+        # Fail
+        raise ValueError(f"Invalid category: {data}")
+    
+    def __str__(self) -> str:
+        """Display the description by default"""
+        return self.description  
 
 class VIN(str):
     legal_characters: ClassVar[str] = '0123456789ABCDEFGHJKLMNPRSTUVWXYZ'
@@ -60,7 +105,7 @@ class VIN(str):
     def __new__(cls, data: str = ''):
         data = data.upper().strip()
         if not data:
-            data = cls.generate()
+            return cls.generate()
         return super().__new__(cls, data)
     
     @classmethod
@@ -78,18 +123,19 @@ class VIN(str):
         return cls.legal_chk_digits[chk_sum]
     
     @classmethod
-    def generate(cls) -> str:
+    def generate(cls) -> VIN:
         base = ''.join(np.random.choice(list(cls.legal_characters), size=17))
         chk = cls._checksum(base)
-        return base[:8] + chk + base[9:]
-        
+        data = base[:8] + chk + base[9:]
+        return VIN(data)
+  
 class BTW(str):
     legal_characters: ClassVar[str] = '0123456789.'
 
     def __new__(cls, data: str = ''):
         data = data.upper().strip()
         if not data:
-            data = cls.generate()
+            return cls.generate()
         return super().__new__(cls, data)
 
     @classmethod
@@ -108,19 +154,19 @@ class BTW(str):
         return str(chk_num)
 
     @classmethod
-    def generate(cls) -> str:
+    def generate(cls) -> BTW:
         x, y, z = np.random.randint(100,1000), np.random.randint(100,1000), np.random.randint(0,10)
         data = f"{np.random.choice([0,1])}{x:04d}.{y:03d}.{z:01d}"
-        return data + cls._checksum(data)
+        data += cls._checksum(data)
+        return BTW(data)
 
 class RRN(str):
     legal_characters: ClassVar[str] = '0123456789.-'
 
-    def __new__(cls, data: str = '', geboortedatum:date|None = None, is_man:bool|None = None):
+    def __new__(cls, data: str = ''):
         data = data.upper().strip()
-        if not data and geboortedatum and (is_man is not None):
-            #een "string" met argumenten voelt fout, maar w/e: RRN(geboortedatum=date(...), is_man=True)
-            data = cls.generate(geboortedatum, is_man)
+        '''if not data:
+            return cls.generate(date(1950,1,1), True)'''
         return super().__new__(cls, data)
 
     @classmethod
@@ -140,20 +186,21 @@ class RRN(str):
     def _checksum(cls, data: str) -> str:
         numbersonly = data.replace('.','').replace('-','')
         rrn_num: str = ''
-        if int(numbersonly[:2]) <= 25:
+        if int(numbersonly[:2]) <= date.today().year%100: #eeuwenwisseling
             rrn_num += '2'
         rrn_num += numbersonly[:9]
         chk_num: int = 97 - int(rrn_num) % 97
         return f"{chk_num:02d}"
 
     @classmethod
-    def generate(cls, geboortedatum: date, is_man: bool) -> str:
+    def generate(cls, geboortedatum: date, is_man: bool) -> RRN:
         x: str = geboortedatum.strftime("%y.%m.%d")
-        y: int = np.random.randint(0,499)*2
-        y += 1 if is_man else 2
+        y: int = np.random.randint(0,499)*2     #0 =< y =< 996
+        y += 1 if is_man else 2                 #0 < y < 999
         data = f"{x}-{y:03d}."
-        return data + cls._checksum(data)
-    
+        data += cls._checksum(data)
+        return RRN(data)
+
 class Bouwjaar(date):
     def __new__(cls, year: int | str):
         return super().__new__(cls, int(year), 1, 1)
@@ -168,12 +215,6 @@ class Bouwjaar(date):
         return (self.__class__, (self.year,))
 
 # --- Generator en Helper functies ---
-def _deserialize_dates(data: dict[str, Any], *keys: str) -> None:
-    for key in keys:
-        date_str = data.get(key)
-        if isinstance(date_str, str):
-            data[key] = date.fromisoformat(date_str)
-
 def _deserialize_obj(data: dict[str, Any], key: str, datamap: dict[str, Any]) -> None: #!depreciated
     id = data.get(key)
     if isinstance(id, str):
@@ -208,14 +249,13 @@ class Klant:
 @dataclass
 class Particulier(Klant):
     geboortedatum: date
-    geslacht: Genders
-    rijksregisternummer: RRN = field(default=RRN(''), kw_only=True)
+    geslacht: Gender
+    rijksregisternummer: RRN = field(kw_only=True)
 
     def __post_init__(self):
         #maak rijksregisternummers
-        if not self.rijksregisternummer:
-            geslacht: bool = self.geslacht == "M"
-            self.rijksregisternummer = RRN(geboortedatum=self.geboortedatum, is_man=geslacht)
+        if not RRN.isvalid(self.rijksregisternummer):
+            self.rijksregisternummer = RRN.generate(self.geboortedatum, self.geslacht == "M")
 
     @property
     def uid(self) -> str: 
@@ -228,8 +268,8 @@ class Particulier(Klant):
         try: 
             d['huisnummer'] = int(d.get('huisnummer', 0))
             d['postcode'] = int(d.get('postcode', 0))
-            _deserialize_dates(d, 'geboortedatum')
-            d['geslacht'] = str(d.get('geslacht', 'X'))[0].upper()
+            d['geboortedatum'] = date.fromisoformat(d.get('geboortedatum', '2001-01-01'))
+            d['geslacht'] = Gender.parse(d.get('geslacht', 'M'))
             d['rijksregisternummer'] = RRN(d.get('rijksregisternummer', ''))
         except ValueError:
             pass
@@ -282,7 +322,7 @@ class Voertuig:
         #hydrateer VIN, Bouwjaar fields
         d['chassisnummer'] = VIN(d.get('chassisnummer', ''))
         d['bouwjaar'] = Bouwjaar(d.get('bouwjaar', '1'))
-        d['categorie'] = VoertuigCategorie(d.get('categorie', 'M1'))
+        d['categorie'] = VoertuigCategorie.parse(d.get('categorie', 'M1'))
         return cls(**d)
 
 @dataclass
@@ -328,15 +368,15 @@ class Reservering:
     def from_dict(cls, data: dict[str, Any]) -> Self:
         #maak een instance van JSON Object of Dict
         d = data.copy()
-        #hydrateer Klant, Voertuig, date fields
-        _deserialize_dates(d, 'van', 'tot')
-        # ingeleverd = bool or te laat (date)
-        ingeleverd = d.get('ingeleverd')
-        if isinstance(ingeleverd, str):
-            match ingeleverd.lower():
-                case 'false': d['ingeleverd'] = False
-                case 'true':  d['ingeleverd'] = True
-                case _: d['ingeleverd'] = date.fromisoformat(ingeleverd)
+        #hydrateer date fields
+        try: 
+            d['van'] = date.fromisoformat(d.get('van','1999-12-30'))
+            d['tot'] = date.fromisoformat(d.get('tot','1999-12-31'))
+            status = d.get('ingeleverd', '1999-12-31')
+            d['ingeleverd'] = status if type(status) is bool else date.fromisoformat(status)
+        except ValueError:
+            pass
+            
         return cls(**d)
 
 @dataclass

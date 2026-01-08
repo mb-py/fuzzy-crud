@@ -1,15 +1,14 @@
 """
 THE SCOPE CREEP IS REAL
 """
-from datamodel import Klant, Particulier, Professioneel, Voertuig, Reservering, RESERVATIE_NUMMER, BTW, RRN, VIN, Bouwjaar, VoertuigCategorie
+from datamodel import *
 from abc import ABC, abstractmethod
-from typing import Any, cast, Callable
+from typing import Any, cast
 from datetime import date
 from rapidfuzz import process, fuzz, utils
-import string
-import weakref
+from string import punctuation
+from weakref import ReferenceType, ref, finalize
 from collections.abc import Iterator
-from dataclasses import fields, MISSING, asdict
 
 class Fuzzable[T]:
     """
@@ -17,7 +16,7 @@ class Fuzzable[T]:
     Responsibility for 'fuzzy matching' and 'comparison' lies here.
     """
     def __init__(self, obj: T, *searchable_attributes: str):
-        self._obj_ref = weakref.ref(obj)
+        self._obj_ref = ref(obj)
         self._search_cache: tuple[str, ...]
         self.match: str | None = None
         self.score: float = -1
@@ -63,10 +62,6 @@ class TypeScribe[T](ABC):
         self._hidden: list[Fuzzable[T]] = []
         self._active_filter: ObjectFilter | None = None
         self._last_query: str = ""
-        #filters
-        self._subclass: type | None = None
-        self._match: dict[str,Any] | None = None
-        self._range: tuple[int, int] | None = None
 
         for obj in objects:
             self.add(obj)
@@ -87,9 +82,9 @@ class TypeScribe[T](ABC):
         return len(self._window)
  
     @property
-    def map(self) -> dict[str, T]:
-        """Note: Objects T must implement a .uid property."""
-        return {getattr(obj, 'uid'): obj for obj in self._objects}
+    def uids(self) -> dict[str, ReferenceType]:
+        """Returns a look-up map with references to all objects. Note: Objects T must implement a .uid property."""
+        return {getattr(obj, 'uid'): ref(obj) for obj in self._objects}
 
     @property
     @abstractmethod
@@ -109,7 +104,7 @@ class TypeScribe[T](ABC):
         return len(self._window)
 
     def __iter__(self):
-        # This yields the actual dataclasses during iteration
+        # Yields dereferenced dataclasses from window during iteration
         for fuzzable in self._window:
             yield fuzzable.obj
 
@@ -120,12 +115,6 @@ class TypeScribe[T](ABC):
         self._last_query = ""
     
     #CREATE
-    def _hydrate(self, data: dict[str, Any], key: str, lookup: dict[str, T]) -> None:
-        """Lookup and replaces a UID string in a dictionary with a object."""
-        val = data.get(key)
-        if isinstance(val, str) and val in lookup:
-            data[key] = lookup[val]
-
     def add(self, obj: T) -> None:
         self._objects.append(obj)
         self._add_fuzzable(obj)
@@ -133,7 +122,7 @@ class TypeScribe[T](ABC):
     def _add_fuzzable(self, obj: T):
         fuzzable = Fuzzable(obj, *self.searchable_attrributes)
         self._window.append(fuzzable)
-        weakref.finalize(obj, TypeScribe._remove_fuzzable, fuzzable, self._window, self._hidden)
+        finalize(obj, TypeScribe._remove_fuzzable, fuzzable, self._window, self._hidden)
 
     #REMOVE
     @staticmethod
@@ -164,28 +153,21 @@ class TypeScribe[T](ABC):
         if not all:
             collection = [obj for obj in self._objects if self._active_filter.matches(obj)] if self._active_filter else self._objects
             self._window = [Fuzzable(obj, *self.searchable_attrributes) for obj in collection]
-            query = self._last_query.strip(string.punctuation)
+            query = self._last_query.strip(punctuation)
             if query:
                 self.run_query(query)
     
     # FILTERS
-    @abstractmethod
-    def get_filters(self) -> list[ObjectFilter | None]:
-        """Returns a list of type names or attribute values used as categories in this scribe."""
-        return [None]
-
     def set_filter(self, filter: ObjectFilter | None = None):
         """Sets a type name or attribue value of a category of objects in this scribe."""
         self._active_filter = filter
         self.refresh(all=False)
 
-
     def run_query(self, query: str, sort=True) -> None:
         """Processes a fuzzy query, updates the internal _current_view heap"""
-        query = query.strip(string.punctuation)
-        #! if backspace
+        query = query.strip(punctuation)
+        #if backspace recover from _hidden
         if query < self._last_query:
-             #Recover from _hidden (LIFO)
             last_word = query.split(" ")[-1]
             while self._hidden:
                 item = self._hidden.pop()
@@ -193,15 +175,15 @@ class TypeScribe[T](ABC):
                     self._window.append(item)
                 else:
                     self._hidden.append(item)
-                    break
-        elif query: #!null queries will not fuzz
+                    break #LIFO
+        elif query: #!null queries will not fuzz >0
             for word in query.split(" "):
-                #Prune
                 i = 0
                 while i < len(self._window):
                     item = self._window[i]
+                    #iterate on match else prune
                     if item.fuzz(word) > 0:
-                        i += 1
+                        i += 1 
                     else:
                         self._hidden.append(item)
                         self._window.remove(item)
@@ -246,14 +228,15 @@ class TypeScribe[T](ABC):
 
     # UPDATE
     @abstractmethod
-    def update(self, obj: T | int, attr: str, value: Any) -> bool:
+    def update(self, obj: T | int, attr: str, value: Any):
         '''
         Updates object. Returns boolean for validation.
         '''
         pass
 
     #CREATE
-    def create_default(self, obj_type: type) -> T | None:
+    @abstractmethod
+    def create_default(self, obj_type: type = type(T)) -> T | None:
         """
         Create a dictionary of default values for creating a new object.
         Returns a dict with field names as keys and default values.
@@ -290,14 +273,6 @@ class KlantScribe(TypeScribe[Klant]):
                 self.add(Professioneel.from_dict(entry))
             else:
                 self.add(Particulier.from_dict(entry))
- 
-    def get_filters(self) -> list[ObjectFilter | None]:
-        return [None, ClassFilter("Particulier"), ClassFilter("Professioneel")]
-    
-    def _issubtype(self, obj) -> bool:
-        if self._active_filter is None:
-            return True
-        return obj.__class__.__name__ == self._active_filter
 
     def get_columns(self) -> tuple[str,...]:
         return "BTW/RRN", "Naam", "Straat", "Huisnummer", "Postcode", "Gemeente"
@@ -310,42 +285,41 @@ class KlantScribe(TypeScribe[Klant]):
                 f"{obj.postcode}",
                 obj.gemeente]
     
-    def update(self, obj: Klant | int, attr: str, value: Any) -> bool:
+    def update(self, obj: Klant | int, attr: str, value: Any):
         if isinstance(obj, int) and obj >= self.count:
             raise IndexError("Index out of range")
         elif isinstance(obj, int):
             obj = self[obj]
         if not hasattr(obj, attr):
             raise ValueError(f"Failed to find attribute {attr}")
-        assert isinstance(obj, (Particulier, Professioneel))
+        
         try:
+            #hydrate
             if attr in ['huisnummer', 'postcode']:
                 value = int(value)
             if attr == 'rijksregisternummer':
                 assert isinstance(obj, Particulier)
-                value = RRN(value) if RRN.isvalid(value) else RRN('',obj.geboortedatum,obj.geslacht=="M")
+                value = RRN(value) if RRN.isvalid(value) else RRN.generate(obj.geboortedatum,obj.geslacht=="M")
             if attr == 'btwnummer':
                 assert isinstance(obj, Professioneel)
-                value = BTW(value) if BTW.isvalid(value) else BTW('')
+                value = BTW(value) if BTW.isvalid(value) else BTW.generate()
             if attr == 'geboortedatum':
                 value = date.fromisoformat(value)
-
+            #set
             setattr(obj, attr, value)
             self.refresh(all=False)
-            return True
         except Exception as e:
             raise ValueError(f"Failed to set attribute: {e}")
         
     def create_default(self, obj_type: type=Particulier) -> Klant | None:
         if obj_type is Particulier:
-            new_obj = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),"M")
-        elif obj_type is Professioneel:
-            new_obj = Professioneel('Dummy Professioneel', 'Industrieweg', 1, 1000, 'Brussel', BTW())
-        else:
-            new_obj = False
-        if new_obj:
+            new_obj = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),Gender.Male, rijksregisternummer=RRN('97.00.00-000.00'))
             self.add(new_obj)
-            return self[-1]
+            return new_obj
+        if obj_type is Professioneel:
+            new_obj = Professioneel('Dummy Professioneel', 'Industrieweg', 1, 1000, 'Brussel', BTW())
+            self.add(new_obj)
+            return new_obj
 
 class VoertuigScribe(TypeScribe[Voertuig]):
     """Scribe for managing Voertuigen."""
@@ -358,14 +332,6 @@ class VoertuigScribe(TypeScribe[Voertuig]):
         for entry in data_list:
             self.add(Voertuig.from_dict(entry))
             
-
-    def get_filters(self) -> list[ObjectFilter | None]:
-        personenwagens = AttributeFilter('categorie', 'M1')
-        bestelbusjes = AttributeFilter('categorie', 'N1')
-        beschikbaar = AttributeFilter('beschikbaar', True)
-        gereserveerd = AttributeFilter('beschikbaar', False)
-        return [None, personenwagens, bestelbusjes, beschikbaar]
-    
     def set_pricefilter(self, limit: int):
         dagprijs = RangeFilter('dagprijs', limit=limit)
         self._active_filter = dagprijs
@@ -380,19 +346,16 @@ class VoertuigScribe(TypeScribe[Voertuig]):
                 f"€{obj.dagprijs}", 
                 obj.status.capitalize()]
     
-    def update(self, obj: Voertuig | int, attr: str, value: Any) -> bool:
+    def update(self, obj: Voertuig | int, attr: str, value: Any):
         if isinstance(obj, int) and obj >= self.count:
             raise IndexError("Index out of range")
         elif isinstance(obj, int):
             obj = self[obj]
-        
         if not hasattr(obj, attr):
             raise ValueError(f"Failed to find attribute {attr}")
         
-        assert isinstance(obj, Voertuig)
-        
         try:
-            #type conversion
+            #hydrate
             if attr == 'chassisnummer':
                 value = VIN(value) if VIN.isvalid(value) else VIN()
             elif attr == 'bouwjaar':
@@ -406,21 +369,17 @@ class VoertuigScribe(TypeScribe[Voertuig]):
                     value = True if value.lower() in ('true', '1', 'yes', 'ja') else False
                 else:
                     value = bool(value)
-            #set and refresh
+            #set
             setattr(obj, attr, value)
             self.refresh(all=False)
-            return True
         except Exception as e:
             raise ValueError(f"Failed to set attribute: {e}")
 
     def create_default(self, obj_type: type=Voertuig) -> Voertuig | None:
         if obj_type is Voertuig:
             new_obj = Voertuig(VIN(), 'Dummy', 'Wagen', Bouwjaar(1977),VoertuigCategorie('M1'),True,0.99)
-        else:
-            new_obj = False
-        if new_obj:
             self.add(new_obj)
-            return self[-1]
+            return new_obj
 
 class ReserveringScribe(TypeScribe[Reservering]):
     """Scribe for managing Reserveringen with dependency mapping."""
@@ -440,34 +399,33 @@ class ReserveringScribe(TypeScribe[Reservering]):
     def searchable_attrributes(self) -> tuple[str,...]:
         return 'nummer', 'strfklant', 'strfmodel', 'strfmerk', 'strftype', 'status'
     
-    def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, Any]) -> None:
-        map_klanten = next((m for m in maps if m and isinstance(next(iter(m.values())), Klant)), {})
-        map_voertuigen = next((m for m in maps if m and isinstance(next(iter(m.values())), Voertuig)), {})
+    def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, ReferenceType[Any]]) -> None:
+        map_klant: dict[str, ReferenceType[Klant]] = next(m for m in maps if m and isinstance(next(iter(m.values()))(), Klant))
+        map_voertuig: dict[str, ReferenceType[Voertuig]] = next(m for m in maps if m and isinstance(next(iter(m.values()))(), Voertuig))
 
         prefix_today = date.today().strftime("%y%m%d")
         max_num = 0
 
         for dry in data_list:
-            # Hydrate the dictionary locally with objects before passing to the model
+            # Hydrate met objects
             moist = dry.copy()
-            self._hydrate(moist, 'klant', map_klanten)
-            self._hydrate(moist, 'voertuig', map_voertuigen)
-
+            #dry uid: str
+            uid_k: str = dry['klant']
+            uid_v: str = dry['voertuig'] 
+            #assign deref obj
+            moist['klant'] = map_klant[uid_k]()
+            moist['voertuig'] = map_voertuig[uid_v]()
+            #add reservatie
             reservatie = Reservering.from_dict(moist)
             self.add(reservatie)
+            #controleer auto-generated nummers
             if reservatie.nummer.startswith(prefix_today):
                 res_num = int(reservatie.nummer[-3:])
                 max_num = max(max_num, res_num)
-        #synchronise generator
+        #synchroniseer generator
         for _ in range(max_num):
             next(RESERVATIE_NUMMER)
             
-    def get_filters(self) -> list[ObjectFilter | None]:
-        duur = RangeFilter('duur', start=3)
-        zakelijk = InceptionClassFilter('klant', 'Professioneel')
-        vrouwelijk = InceptionAttributeFilter('klant', 'geslacht', 'V')
-        return [None, zakelijk, vrouwelijk, duur] 
-
     def get_columns(self) -> tuple[str, ...]:
         return "Nummer", "Klant", "Merk", "Model", "Van", "Tot", "Status"
     
@@ -480,7 +438,7 @@ class ReserveringScribe(TypeScribe[Reservering]):
                 str(obj.tot), 
                 obj.status.capitalize()]
     
-    def update(self, obj: Reservering | int, attr: str, value: Any) -> bool:
+    def update(self, obj: Reservering | int, attr: str, value: Any):
         """Update a field with validation"""
         if isinstance(obj, int) and obj >= self.count:
             raise IndexError("Index out of range")
@@ -489,9 +447,8 @@ class ReserveringScribe(TypeScribe[Reservering]):
         if not hasattr(obj, attr):
             raise ValueError(f"Failed to find attribute {attr}")
         
-        assert isinstance(obj, Reservering)
-
         try:
+            #hydrate
             if isinstance(value, str):
                 if attr == 'van' or attr == 'tot':
                     value = date.fromisoformat(value)
@@ -502,7 +459,7 @@ class ReserveringScribe(TypeScribe[Reservering]):
                         value = False
                     else:
                         value = date.fromisoformat(value)
-            # Validate date logic
+            #validate date logic
             if attr == 'van' and hasattr(obj, 'tot'):
                 if isinstance(value, date) and value > obj.tot:
                     raise ValueError("Start date cannot be after end date")
@@ -511,25 +468,21 @@ class ReserveringScribe(TypeScribe[Reservering]):
                     raise ValueError("End date cannot be before start date")
             #set
             setattr(obj, attr, value)
+            self.refresh(all=False)
             #update voertuig
             if attr == 'ingeleverd' and value:
                 obj.voertuig.beschikbaar = True
-            #refresh
-            self.refresh(all=False)
-            return True
+                #TODO FACTUREN
         except Exception as e:
             raise ValueError(f"Failed to set attribute: {e}")
         
     def create_default(self, obj_type: type=Reservering) -> Reservering | None:
         if obj_type is Reservering:
-            dummy_klant = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),"M")
+            dummy_klant = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),Gender.Male,rijksregisternummer=RRN('97.00.00-000.00'))
             dummy_voertuig = Voertuig(VIN(), 'Dummy', 'Wagen', Bouwjaar(1977),VoertuigCategorie('M1'),True,0.99)
             new_obj = Reservering(dummy_klant, dummy_voertuig, date.today(), date.today(), False)
-        else:
-            new_obj = False
-        if new_obj:
             self.add(new_obj)
-            return self[-1]
+            return new_obj
 
 
 # --- Filters ---
