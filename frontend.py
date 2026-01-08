@@ -106,6 +106,11 @@ class TerminalApp:
         menu.add_item("Laad Data", lambda: read_data())
         menu.add_item("Save Data", lambda: save_data())
         menu.add_item("Sluit Programma", lambda: self.exit())
+        menu.add_separator("TODO")
+        menu.add_item("Facturen", lambda: self.add_log('Facturen is nog niet geimplementeerd'))
+        menu.add_item("Auto inleveren", lambda: self.add_log('Inleveren is nog niet geimplementeerd'))
+        menu.add_item("Prijsplafond instellen", lambda: self.add_log('Interactief prijsplafond is nog niet geimplementeerd'))
+        menu.add_item("Statistieken", lambda: self.add_log('Satistiek peneel is nog niet geimplementeerd'))
         
         return menu
     
@@ -523,7 +528,6 @@ class TerminalApp:
         """Main application loop"""
         self.layout = self.make_layout()
         self.update_display()
-        
         try:
             with Live(self.layout, refresh_per_second=20, screen=True, redirect_stdout=False) as self.live:
                 while self.running:

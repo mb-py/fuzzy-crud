@@ -1,0 +1,9 @@
+[project]
+name = "fuzzy-crud"
+dependencies = [
+    "rapidfuzz",
+    "numpy",
+    "rich",
+    "pygetwindow",
+    "keyboard"]
+requires-python = ">=3.12"
