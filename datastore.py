@@ -51,7 +51,7 @@ def save_data():
             } for r in reserveringen.all],
         "facturen": []
     }
-    with open(TEST_FILE, "w", encoding="utf-8") as f:
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4, default=str)
 
 

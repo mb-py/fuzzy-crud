@@ -140,7 +140,7 @@ class DataTable():
         
     def compose(self, focused:bool, title_suffix: str = "") -> Panel:
         # --- Styling ---
-        title_style = "white"  if focused else "bright_black"
+        title_style = "b white"  if focused else "bright_black"
         panel_style = "bright_black"
         table_style = "bright_black"
         # --- Table ---
@@ -191,7 +191,7 @@ class DataTable():
         filtered = '(All)' if self.scribe._active_filter is None else '(Filtered)'
         hidden = len(self.scribe._hidden)
         stats = f"{self.scribe.count} ({hidden} hidden)" if hidden > 0 else f"{self.scribe.count}"
-        title_text = f"[b {title_style}]{scribe_name}{filtered}[/]  - Showing {stats}"
+        title_text = f"[{title_style}]{scribe_name}{filtered}[/] - Showing {stats}"
         if title_suffix:
             title_text += f" - {title_suffix}"
         

@@ -187,6 +187,14 @@
             "postcode": 3620,
             "gemeente": "Lanaken",
             "btwnummer": "00241.540.787"
+        },
+        {
+            "naam": "M. Zevenkeer Bordelmaker",
+            "straat": "Gans Fabriekstraat",
+            "huisnummer": 7,
+            "postcode": 3600,
+            "gemeente": "Genk",
+            "btwnummer": "00915.547.336"
         }
     ],
     "voertuigen": [
@@ -684,6 +692,15 @@
             "categorie": "M1",
             "beschikbaar": true,
             "dagprijs": 55.86
+        },
+        {
+            "chassisnummer": "379PE5E891HTLK2YM",
+            "merk": "Ferrari",
+            "model": "Enzo",
+            "bouwjaar": "2002",
+            "categorie": "M1",
+            "beschikbaar": true,
+            "dagprijs": 99.99
         }
     ],
     "reserveringen": [
@@ -845,6 +862,14 @@
             "voertuig": "H8CNCENS33GJU21PU",
             "van": "2025-11-07",
             "tot": "2025-11-12",
+            "ingeleverd": false
+        },
+        {
+            "nummer": "260108-001",
+            "klant": "00915.547.336",
+            "voertuig": "379PE5E891HTLK2YM",
+            "van": "2026-01-01",
+            "tot": "2026-01-11",
             "ingeleverd": false
         }
     ],

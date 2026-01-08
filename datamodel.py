@@ -290,7 +290,7 @@ class Professioneel(Klant):
         try:
             #strings
             d['huisnummer'] = int(d.get('huisnummer', 0))
-            d['postcode'] = int(d.get('huisnummer', 0))
+            d['postcode'] = int(d.get('postcode', 0))
             #hydrateer BTW fields
             d['btwnummer'] = BTW(d.get('btwnummer', ''))
         except ValueError:
