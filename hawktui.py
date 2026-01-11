@@ -319,7 +319,7 @@ class ObjectEditor():
         self.errors.clear()
         if self.is_creating and self.obj.uid is None:
             self.cancel_creation()
-            raise Exception("Creation canceled.")
+            raise Exception("Creation canceled. UID not set (RRN/BTW/VIN/R-nummer).")
         self.obj = None
         self.obj_type = None
         self.is_creating = False
