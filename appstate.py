@@ -11,6 +11,7 @@ class AppMode(Enum):
     CREATING = auto()      # Creating a new object
     SELECTING = auto()     # Selecting a related object (for Reservering)
     MENU = auto()          # Navigating main menu
+    REQUEST = auto()
 
 @dataclass
 class AppState:
@@ -31,7 +32,11 @@ class AppState:
     # Selection state (for Reservering dependencies)
     selecting_for: str | None = None  # 'klant' or 'voertuig'
     selection_scribe: TypeScribe | None = None
-    selection_return_mode: AppMode | None = None
+    return_mode: AppMode | None = None
+
+    def enter_request(self):
+        self.return_mode = self.mode
+        self.mode = AppMode.REQUEST
     
     def enter_browsing(self):
         """Transition to browsing mode"""
@@ -41,16 +46,18 @@ class AppState:
         self.creating_type = None
         self.selecting_for = None
         self.selection_scribe = None
-        self.selection_return_mode = None
+        self.return_mode = None
     
     def enter_editing(self, index: int):
         """Transition to editing mode"""
+        self.return_mode = self.mode
         self.mode = AppMode.EDITING
         self.editing_index = index
         self.sidepanel_open = True
     
     def enter_creating(self, obj_type: type):
         """Transition to creating mode"""
+        self.return_mode = self.mode
         self.mode = AppMode.CREATING
         self.creating_type = obj_type
         self.editing_index = None
@@ -58,7 +65,7 @@ class AppState:
     
     def enter_selecting(self, field_name: str, scribe: TypeScribe, return_mode: AppMode):
         """Transition to selection mode"""
-        self.selection_return_mode = return_mode
+        self.return_mode = return_mode
         self.mode = AppMode.SELECTING
         self.selecting_for = field_name
         self.selection_scribe = scribe
@@ -66,12 +73,20 @@ class AppState:
     
     def exit_selecting(self):
         """Return from selection mode"""
-        if self.selection_return_mode:
-            self.mode = self.selection_return_mode
+        if self.return_mode:
+            self.mode = self.return_mode
             self.sidepanel_open = True
         self.selecting_for = None
         self.selection_scribe = None
-        self.selection_return_mode = None
+        self.return_mode = None
+
+    def exit_mode(self):
+        """Return from REQUEST/EDIT/CREATING mode"""
+        if self.return_mode:
+            self.mode = self.return_mode
+        if self.mode != AppMode.MENU:
+            self.sidepanel_open = False
+        self.return_mode = None
 
     def enter_menu(self):
         """Transition to menu mode"""
@@ -82,7 +97,7 @@ class AppState:
     @property
     def is_input_focused(self) -> bool:
         """Check if input field should be focused"""
-        return self.mode == AppMode.SEARCHING
+        return self.mode in (AppMode.SEARCHING, AppMode.REQUEST)
     
     @property
     def is_table_focused(self) -> bool:
@@ -160,5 +175,10 @@ class ModeKeyBindings:
                 KeyBinding("k", "Up", None),
                 KeyBinding("Enter", "Select", None),
                 KeyBinding("Esc", "Close Menu", None),
+            ]
+        elif mode == AppMode.REQUEST:
+            return [
+                KeyBinding("Enter", "Submit", None),
+                KeyBinding("Esc", "Cancel", None),
             ]
         return []

@@ -91,6 +91,7 @@ class TerminalApp:
             menu.add_item("Toon Bestelbusjes", lambda: self._switch_scribe(voertuigen, filter_bestelbusjes))
             menu.add_item("Toon Beschikbaar", lambda: self._switch_scribe(voertuigen, filter_beschikbare_wagens))
             menu.add_item("Gebruikt door Vrouwen", lambda: self._switch_scribe(voertuigen, UIDFilter(uidmacro())))
+            menu.add_item("Stel prijsplafond in", lambda: self.state.enter_request())
         elif self.state.active_scribe == reserveringen:
             menu.add_separator("Maak Reserveringen")
             menu.add_item("Maak Reservering", lambda: self._create_from_menu(reserveringen, Reservering))
@@ -125,11 +126,13 @@ class TerminalApp:
         menu.add_item("Laad Data", lambda: read_data())
         menu.add_item("Save Data", lambda: save_data())
         menu.add_item("Sluit Programma", lambda: self.exit())
-        menu.add_separator("TODO")
-        menu.add_item("Prijsplafond instellen", lambda: self.add_log('Interactief prijsplafond is nog niet geimplementeerd'))
         
         return menu
     
+    def _req_prijs(self):
+        self.cmd
+        self.state.enter_request()
+
     def _switch_scribe(self, scribe: TypeScribe, filter=None, browse=True):
         """Switch to a different scribe"""
         self.state.active_scribe = scribe
@@ -209,6 +212,15 @@ class TerminalApp:
                             self.state.enter_browsing()
                     else:
                         self.add_log(f"Invalid value for {self.editor.current_field_name}")
+            elif self.state.mode == AppMode.REQUEST:
+                assert self.state.return_mode is not None
+                try:
+                    if value is not None:
+                        prijs = int(value)
+                        self.state.exit_mode()
+                        self.toon_dagprijs(prijs)
+                except:
+                    self.add_log(f"Invalid value for filter.")
             
             if self.layout:
                 self.update_display()
@@ -246,6 +258,10 @@ class TerminalApp:
         if len(self.logs) > 4:
             self.logs.pop(0)
     
+    def toon_dagprijs(self, value):
+        self._switch_scribe(voertuigen, RangeFilter('dagprijs', 0, value))
+        self.cmd.clear()
+            
     def _log_reservatie_statistieken_maand(self):
         """Add a log message"""
         reset_filter = reserveringen._active_filter
@@ -354,7 +370,7 @@ class TerminalApp:
             return self.editor.compose("Edit")
         elif self.state.mode == AppMode.CREATING:
             return self.editor.compose("Create")
-        elif self.state.mode == AppMode.MENU:
+        elif self.state.mode in (AppMode.MENU, AppMode.REQUEST):
             return self.menu.compose()
     
         return Panel("", box=SQUARE, border_style='bright_black')
@@ -382,6 +398,8 @@ class TerminalApp:
                 placeholder = str(placeholder)
             else:
                 placeholder = f"[{self.editor.current_field_name}] Press ENTER to edit"
+        elif self.state.mode == AppMode.REQUEST:
+            placeholder = f"Voer dagprijs in:"
         focus = self.state.is_input_focused or self.editor.is_editing_field
         return self.cmd.compose(focused=focus, placeholder=placeholder)
     
@@ -415,8 +433,8 @@ class TerminalApp:
             # Route to mode-specific handlers
             if self.state.mode == AppMode.BROWSING:
                 self._handle_browsing_keys(key)
-            elif self.state.mode == AppMode.SEARCHING:
-                self._handle_searching_keys(key, event)
+            elif self.state.mode in (AppMode.SEARCHING, AppMode.REQUEST):
+                self._handle_input_keys(key, event)
             elif self.state.mode in (AppMode.EDITING, AppMode.CREATING):
                 self._handle_editing_keys(key, event)
             elif self.state.mode == AppMode.SELECTING:
@@ -442,11 +460,17 @@ class TerminalApp:
             self.cmd.clear()
             self.editor.move_next()
         elif self.state.mode in (AppMode.EDITING, AppMode.CREATING) and not self.editor.is_editing_field:
-            self.state.enter_menu()
-            self.editor.finish_obj_edit()
+            self.state.exit_mode()
+            if self.state.mode == AppMode.MENU:
+                self.state.enter_menu()
             self.cmd.clear()
+            self.editor.finish_obj_edit()
         elif self.state.mode == AppMode.BROWSING:
             self.state.enter_menu()
+        elif self.state.mode == AppMode.REQUEST:
+            assert self.state.return_mode is not None
+            self.state.mode = self.state.return_mode
+            self.cmd.clear()
         else:
             self.state.enter_browsing()
             self.cmd.clear()
@@ -500,7 +524,7 @@ class TerminalApp:
             # Execute selected menu item
             self.state.enter_browsing()
 
-    def _handle_searching_keys(self, key: str, event: keyboard.KeyboardEvent):
+    def _handle_input_keys(self, key: str, event: keyboard.KeyboardEvent):
         """Handle keys in searching mode"""
         if key in ('enter', 'tab', 'backspace', 'space') or len(key) == 1:
             self.cmd.key_event(event)
