@@ -239,7 +239,7 @@ class Klant:
     gemeente: str
 
     @property #voor lookup dictionary of str reference
-    def uid(self) -> str: 
+    def uid(self) -> str | None: 
         raise NotImplementedError
 
     @property
@@ -258,7 +258,9 @@ class Particulier(Klant):
             self.rijksregisternummer = RRN.generate(self.geboortedatum, self.geslacht == "M")
 
     @property
-    def uid(self) -> str: 
+    def uid(self) -> str | None: 
+        if self.rijksregisternummer == '00.00.00-000.29':
+            return None
         return self.rijksregisternummer
         
     @classmethod
@@ -280,7 +282,9 @@ class Professioneel(Klant):
     btwnummer: BTW
 
     @property
-    def uid(self) -> str: 
+    def uid(self) -> str | None: 
+        if self.btwnummer == '00000.000.000':
+            return None
         return self.btwnummer
 
     @classmethod
@@ -308,7 +312,9 @@ class Voertuig:
     dagprijs: float = field(default=35.99)
 
     @property
-    def uid(self) -> str: 
+    def uid(self) -> str | None: 
+        if self.chassisnummer == '00000000000000000':
+            return None
         return self.chassisnummer
     
     @property
@@ -335,7 +341,9 @@ class Reservering:
     ingeleverd: bool | date = field(default=False)
 
     @property
-    def uid(self) -> str: 
+    def uid(self) -> str | None:
+        if self.klant.uid is None or self.voertuig.uid is None:
+            return None
         return self.nummer
     
     @property
@@ -346,7 +354,7 @@ class Reservering:
     
     @property
     def duur(self) -> int:
-        return (self.tot - self.van).days
+        return (self.tot - self.van).days + 1
     
     @property
     def strfklant(self) -> str: 
@@ -358,11 +366,11 @@ class Reservering:
     
     @property
     def strfmerk(self) -> str: 
-        return f"{self.voertuig.merk}"
+        return self.voertuig.merk
     
     @property
     def strfmodel(self) -> str: 
-        return f"{self.voertuig.model}"
+        return self.voertuig.model
     
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
@@ -383,11 +391,65 @@ class Reservering:
 class Factuur:
     reservering: Reservering
     bedrag: float = field(default=0)
+
+    @property
+    def uid(self) -> str | None: 
+        return self.reservering.nummer
     
+    @property
+    def duur(self) -> int: 
+        return self.reservering.duur
+    
+    @property
+    def strfklant(self) -> str: 
+        return self.reservering.strfklant
+    
+    @property
+    def strftype(self) -> str: 
+        return self.reservering.strftype
+    
+    @property
+    def strfmerk(self) -> str: 
+        return self.reservering.strfmerk
+    
+    @property
+    def strfmodel(self) -> str: 
+        return self.reservering.strfmodel
+    
+    
+    def __post_init__(self):
+        self.reservering.voertuig.beschikbaar = True
+        self.reservering.ingeleverd = True
+        if self.bedrag == 0:
+            dagprijs = self.reservering.voertuig.dagprijs
+            duur = self.reservering.duur
+            self.bedrag = dagprijs * duur
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any], map_reserveringen: dict[str, Reservering]) -> Self:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         #maak een instance van JSON Object of Dict
         d = data.copy()
-        #hydrateer Reservering
-        _deserialize_obj(d, 'reservering', map_reserveringen)
+        '''#hydrateer Reservering
+        _deserialize_obj(d, 'reservering', map_reserveringen)'''
         return cls(**d)
+    
+    @classmethod
+    def from_finalize_reservatie(cls, r: Reservering, inleverdatum: date|None = None):
+        r, bedrag = cls.finalize_reservatie(r, inleverdatum)
+        return cls(r, bedrag)
+    
+    @classmethod
+    def finalize_reservatie(cls, r: Reservering, inleverdatum: date|None = None):
+        wagen = r.voertuig
+        bedrag = wagen.dagprijs * r.duur
+        r.ingeleverd = True
+        wagen.beschikbaar = True
+        if inleverdatum is not None and inleverdatum > r.tot:
+            r.ingeleverd = inleverdatum
+            telaat = (inleverdatum - r.tot).days
+            bedrag += (wagen.dagprijs * telaat)*2
+        return r, bedrag
+
+if __name__ == "__main__":
+    rrn = RRN('00.00.00-000.29')
+    print(rrn, RRN._checksum('00.00.00-000.29'))

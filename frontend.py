@@ -14,9 +14,9 @@ import pygetwindow as gw
 import keyboard
 
 from hawktui import commandField, ObjectEditor, DataTable, Menu
-from datastore import klanten, voertuigen, reserveringen, read_data, save_data
+from datastore import klanten, voertuigen, reserveringen, facturen, read_data, save_data
 from appstate import AppState, AppMode, ModeKeyBindings
-from datamodel import Reservering, Particulier, Professioneel, Voertuig
+from datamodel import Reservering, Particulier, Professioneel, Voertuig, Factuur
 from datascrivener import TypeScribe, AttributeFilter, InceptionAttributeFilter, RangeFilter, UIDFilter, CompoundFilter
 
 # --- FILTERS OPDRACHT ---
@@ -79,9 +79,6 @@ class TerminalApp:
             menu.add_item("Toon Professioneel", lambda: self._switch_scribe(klanten, filter_zakelijke_klanten))
             menu.add_item("Maak Particulier", lambda: self._create_from_menu(klanten, Particulier))
             menu.add_item("Maak Professioneel", lambda: self._create_from_menu(klanten, Professioneel))
-            menu.add_separator("Ander Menu")
-            menu.add_item("Voertuigen", lambda: self._switch_scribe(voertuigen, browse=False))
-            menu.add_item("Reserveringen", lambda: self._switch_scribe(reserveringen, browse=False))
         elif self.state.active_scribe == voertuigen:
             menu.add_separator("Menu Voertuigen")
             menu.add_item("Toon Alle", lambda: self._switch_scribe(voertuigen))
@@ -90,25 +87,32 @@ class TerminalApp:
             menu.add_item("Toon Beschikbaar", lambda: self._switch_scribe(voertuigen, filter_beschikbare_wagens))
             menu.add_item("Gebruikt door Vrouwen", lambda: self._switch_scribe(voertuigen, UIDFilter(uidmacro())))
             menu.add_item("Maak Voertuig", lambda: self._create_from_menu(voertuigen, Voertuig))
-            menu.add_separator("Ander Menu")
-            menu.add_item("Klanten", lambda: self._switch_scribe(klanten, browse=False))
-            menu.add_item("Reserveringen", lambda: self._switch_scribe(reserveringen, browse=False))
         elif self.state.active_scribe == reserveringen:
             menu.add_separator("Menu Reserveringen")
             menu.add_item("Toon Alle", lambda: self._switch_scribe(reserveringen))
             menu.add_item("Toon Zakelijk", lambda: self._switch_scribe(reserveringen, filter_zakelijke_reserveringen))
             menu.add_item("Toon vanaf 4d", lambda: self._switch_scribe(reserveringen, filter_reserveringen_op_duurtijd))
             menu.add_item("Maak Reservering", lambda: self._create_from_menu(reserveringen, Reservering))
-            menu.add_separator("Ander Menu")
+        elif self.state.active_scribe == facturen:
+            menu.add_separator("Menu Facturen")
+            menu.add_item("Toon Alle", lambda: self._switch_scribe(facturen))
+            menu.add_item("Toon Zakelijk", lambda: self._switch_scribe(facturen, filter_zakelijke_klanten))
+            menu.add_item("Maak Factuur", lambda: self._create_from_menu(facturen, Factuur))
+        menu.add_separator("Ander Menu")
+        if self.state.active_scribe != klanten:
             menu.add_item("Klanten", lambda: self._switch_scribe(klanten, browse=False))
+        if self.state.active_scribe != voertuigen:
             menu.add_item("Voertuigen", lambda: self._switch_scribe(voertuigen, browse=False))
+        if self.state.active_scribe != reserveringen:
+            menu.add_item("Reserveringen", lambda: self._switch_scribe(reserveringen, browse=False))
+        if self.state.active_scribe != facturen:
+            menu.add_item("Facturen", lambda: self._switch_scribe(facturen, browse=False))
+            menu.add_item("Auto Inleveren", lambda: self._create_from_menu(facturen, Factuur))
         menu.add_separator("Systeem")
         menu.add_item("Laad Data", lambda: read_data())
         menu.add_item("Save Data", lambda: save_data())
         menu.add_item("Sluit Programma", lambda: self.exit())
         menu.add_separator("TODO")
-        menu.add_item("Facturen", lambda: self.add_log('Facturen is nog niet geimplementeerd'))
-        menu.add_item("Auto inleveren", lambda: self.add_log('Inleveren is nog niet geimplementeerd'))
         menu.add_item("Prijsplafond instellen", lambda: self.add_log('Interactief prijsplafond is nog niet geimplementeerd'))
         menu.add_item("Statistieken", lambda: self.add_log('Satistiek peneel is nog niet geimplementeerd'))
         
@@ -176,14 +180,16 @@ class TerminalApp:
                 self.state.enter_browsing()
             elif self.state.mode == AppMode.SELECTING:
                 self.editor.finish_field_edit()
+                self.cmd.clear()
+                self.editor.move_next()
             elif self.state.mode in (AppMode.EDITING, AppMode.CREATING):
                 if self.editor.is_editing_field:
                     # Submitting field value
                     data = value if value else ""
                     if self.editor.validate_and_submit(data):
                         self.editor.finish_field_edit()
-                        self.editor.move_next()
                         self.cmd.clear()
+                        self.editor.move_next()
                         
                         # If finished all fields, finalize
                         if self.editor.field_idx >= len(self.editor.names):
@@ -201,8 +207,8 @@ class TerminalApp:
                     # TAB to accept suggestion and move to next
                     self.editor.validate_and_submit(value)
                     self.editor.finish_field_edit()
-                    self.editor.move_next()
                     self.cmd.clear()
+                    self.editor.move_next()
                     
                     if self.editor.field_idx >= len(self.editor.names):
                         self.state.enter_browsing()
@@ -210,6 +216,8 @@ class TerminalApp:
             elif self.state.mode == AppMode.SELECTING:
                 if self.editor.is_editing_field and value:
                     self.editor.finish_field_edit()
+                    self.cmd.clear()
+                    self.editor.move_next()
                     
             if self.layout:
                 self.update_display()
@@ -389,7 +397,11 @@ class TerminalApp:
             self.selection_table = None
         elif self.state.mode in (AppMode.EDITING, AppMode.CREATING) and self.editor.is_editing_field:
             self.editor.finish_field_edit()
+            self.cmd.clear()
             self.editor.move_next()
+        elif self.state.mode in (AppMode.EDITING, AppMode.CREATING) and not self.editor.is_editing_field:
+            self.state.enter_menu()
+            self.editor.finish_obj_edit()
             self.cmd.clear()
         elif self.state.mode == AppMode.BROWSING:
             self.state.enter_menu()
@@ -484,6 +496,11 @@ class TerminalApp:
                     self.selection_table = DataTable(self.console, voertuigen)
                     voertuigen.set_filter(AttributeFilter('beschikbaar', True))
                     voertuigen.refresh(all=False)
+                elif field_name == 'reservering':
+                    self.state.enter_selecting('reservering', reserveringen, self.state.mode)
+                    self.selection_table = DataTable(self.console, reserveringen)
+                    reserveringen.set_filter(AttributeFilter('ingeleverd', False))
+                    reserveringen.refresh(all=False)
                 self.cmd.clear()
     
     def _handle_selecting_keys(self, key: str, event: keyboard.KeyboardEvent):
@@ -522,6 +539,8 @@ class TerminalApp:
             return Voertuig
         elif self.state.active_scribe is reserveringen:
             return Reservering
+        elif self.state.active_scribe is facturen:
+            return Factuur
         return None
     
     def run(self):

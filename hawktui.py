@@ -1,5 +1,4 @@
 import time
-from datetime import datetime, date
 from typing import List, Callable, Any
 from dataclasses import fields, MISSING
 
@@ -13,7 +12,7 @@ from rich.rule import Rule
 import keyboard
 from typing import Literal
 from datascrivener import TypeScribe
-from datamodel import Particulier, Professioneel, Voertuig, Reservering, Klant, VoertuigCategorie, BTW, RRN, VIN, Bouwjaar
+from datamodel import Particulier, Professioneel
 
 EventTypes = Literal["changed", "submitted", "accepted"]
 
@@ -235,7 +234,7 @@ class ObjectEditor():
         except Exception as e:
             raise ValueError(f"Failed to create default object: {e}")
     
-    def _initialize_fields(self):
+    def _initialize_fields(self, clear_errors=True):
         """Initialize fields from existing object"""
         if self.obj is None:
             return
@@ -245,7 +244,9 @@ class ObjectEditor():
         self.names.clear()
         self.types.clear()
         self.values.clear()
-        self.errors.clear()
+        if clear_errors:
+            self.errors.clear()
+            self.field_idx = 0
         
         for f in fields(self.obj):
             if f.name == 'nummer':  # Skip auto-generated
@@ -255,9 +256,9 @@ class ObjectEditor():
             self.names.append(f.name)
             self.types.append(f.type)
             self.values.append(val)
-            self.errors.append("")
+            if clear_errors:
+                self.errors.append("")
         
-        self.field_idx = 0
     
     @property
     def current_field_name(self) -> str:
@@ -283,7 +284,7 @@ class ObjectEditor():
     def needs_selection(self) -> bool:
         """Check if current field needs object selection"""
         field_name = self.current_field_name
-        return field_name in ('klant', 'voertuig')
+        return field_name in ('klant', 'voertuig', 'reservering')
     
     def move_next(self):
         """Move to next field"""
@@ -305,6 +306,20 @@ class ObjectEditor():
         """Finish editing the current field"""
         self.is_editing_field = False
     
+    def finish_obj_edit(self):
+        """Finish editing the current obj"""
+        self.names.clear()
+        self.types.clear()
+        self.values.clear()
+        self.errors.clear()
+        if self.is_creating and self.obj.uid is None:
+            self.cancel_creation()
+            raise Exception("Creation canceled.")
+        self.obj = None
+        self.obj_type = None
+        self.is_creating = False
+        self.is_editing_field = False
+
     def can_change_type(self) -> bool:
         """Check if the current object type can be changed (only during creation)"""
         if not self.is_creating:  # Can ONLY change type when creating
@@ -348,10 +363,16 @@ class ObjectEditor():
     
     def cancel_creation(self):
         """Remove the created object if canceling during creation"""
-        if self.is_creating and self.obj is not None:
-            self.scribe.remove(self.obj)
-            self.scribe.refresh(all=False)
-        self.is_creating = False
+        if self.is_creating:
+            self.is_creating = False
+            if self.obj is not None:
+                self.scribe.remove(self.obj)
+                self.scribe.refresh(all=False)
+            self.obj = None
+            self.obj_type = None
+            self.is_creating = False
+            self.is_editing_field = False
+
     
     def validate_and_submit(self, data: str) -> bool:
         """Validate and submit data for current field. Returns True if valid."""
@@ -367,6 +388,9 @@ class ObjectEditor():
             updated_value = getattr(self.obj, field_name)
             self.values[idx] = updated_value
             self.errors[idx] = ""
+            
+            # Update other fields in case of dynamic changes (facturen)
+            self._initialize_fields(clear_errors=False)
             return True
         except (ValueError, TypeError) as e:
             # Store error

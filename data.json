@@ -213,7 +213,7 @@
             "model": "A-Klasse",
             "bouwjaar": "2017",
             "categorie": "M1",
-            "beschikbaar": true,
+            "beschikbaar": false,
             "dagprijs": 47.45
         },
         {
@@ -321,7 +321,7 @@
             "model": "Vivaro",
             "bouwjaar": "2024",
             "categorie": "N1",
-            "beschikbaar": false,
+            "beschikbaar": true,
             "dagprijs": 92.26
         },
         {
@@ -339,7 +339,7 @@
             "model": "Corsa",
             "bouwjaar": "2019",
             "categorie": "M1",
-            "beschikbaar": false,
+            "beschikbaar": true,
             "dagprijs": 42.96
         },
         {
@@ -393,7 +393,7 @@
             "model": "Transit",
             "bouwjaar": "2020",
             "categorie": "N1",
-            "beschikbaar": true,
+            "beschikbaar": false,
             "dagprijs": 68.22
         },
         {
@@ -465,7 +465,7 @@
             "model": "Golf",
             "bouwjaar": "2023",
             "categorie": "M1",
-            "beschikbaar": false,
+            "beschikbaar": true,
             "dagprijs": 48.87
         },
         {
@@ -483,7 +483,7 @@
             "model": "Polo",
             "bouwjaar": "2021",
             "categorie": "M1",
-            "beschikbaar": true,
+            "beschikbaar": false,
             "dagprijs": 51.78
         },
         {
@@ -573,7 +573,7 @@
             "model": "Proace",
             "bouwjaar": "2020",
             "categorie": "N1",
-            "beschikbaar": false,
+            "beschikbaar": true,
             "dagprijs": 69.49
         },
         {
@@ -618,7 +618,7 @@
             "model": "Yaris",
             "bouwjaar": "2022",
             "categorie": "M1",
-            "beschikbaar": true,
+            "beschikbaar": false,
             "dagprijs": 55.63
         },
         {
@@ -726,7 +726,7 @@
             "voertuig": "D30GU00D74788TWFC",
             "van": "2025-10-01",
             "tot": "2025-10-07",
-            "ingeleverd": false
+            "ingeleverd": true
         },
         {
             "nummer": "251224-004",
@@ -766,7 +766,7 @@
             "voertuig": "FV9WR8MN6LC0SS3A9",
             "van": "2025-10-03",
             "tot": "2025-10-05",
-            "ingeleverd": true
+            "ingeleverd": false
         },
         {
             "nummer": "251224-009",
@@ -774,7 +774,7 @@
             "voertuig": "1LN547BR5A6STUHEM",
             "van": "2025-11-05",
             "tot": "2025-11-10",
-            "ingeleverd": true
+            "ingeleverd": false
         },
         {
             "nummer": "251224-010",
@@ -782,7 +782,7 @@
             "voertuig": "ZPX0DHYU5NEGWGJYU",
             "van": "2025-09-09",
             "tot": "2025-09-11",
-            "ingeleverd": false
+            "ingeleverd": true
         },
         {
             "nummer": "251224-011",
@@ -814,7 +814,7 @@
             "voertuig": "Z9DZ5ADC89VND831P",
             "van": "2025-09-13",
             "tot": "2025-09-14",
-            "ingeleverd": true
+            "ingeleverd": false
         },
         {
             "nummer": "251224-015",
@@ -846,7 +846,7 @@
             "voertuig": "AGL2V4CJ9WRB0JWTC",
             "van": "2025-09-03",
             "tot": "2025-09-05",
-            "ingeleverd": false
+            "ingeleverd": true
         },
         {
             "nummer": "251224-019",
@@ -854,7 +854,7 @@
             "voertuig": "1H6WFZZW63AHSHHTP",
             "van": "2025-10-16",
             "tot": "2025-10-20",
-            "ingeleverd": true
+            "ingeleverd": false
         },
         {
             "nummer": "251224-020",
@@ -862,7 +862,7 @@
             "voertuig": "H8CNCENS33GJU21PU",
             "van": "2025-11-07",
             "tot": "2025-11-12",
-            "ingeleverd": false
+            "ingeleverd": true
         },
         {
             "nummer": "260108-001",
@@ -873,5 +873,42 @@
             "ingeleverd": false
         }
     ],
-    "facturen": []
+    "facturen": [
+        {
+            "reservering": "251224-001",
+            "bedrag": 85.78
+        },
+        {
+            "reservering": "251224-006",
+            "bedrag": 289.17
+        },
+        {
+            "reservering": "251224-011",
+            "bedrag": 535.0799999999999
+        },
+        {
+            "reservering": "251224-015",
+            "bedrag": 295.2
+        },
+        {
+            "reservering": "251224-010",
+            "bedrag": 208.46999999999997
+        },
+        {
+            "reservering": "251224-003",
+            "bedrag": 300.72
+        },
+        {
+            "reservering": "251224-002",
+            "bedrag": 221.57999999999998
+        },
+        {
+            "reservering": "251224-018",
+            "bedrag": 146.60999999999999
+        },
+        {
+            "reservering": "251224-020",
+            "bedrag": 553.5600000000001
+        }
+    ]
 }

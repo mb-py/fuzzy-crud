@@ -278,7 +278,7 @@ class KlantScribe(TypeScribe[Klant]):
         return "BTW/RRN", "Naam", "Straat", "Huisnummer", "Postcode", "Gemeente"
     
     def _format_row(self, obj: Klant) -> list[str]:
-        return [obj.uid, 
+        return [obj.uid if obj.uid is not None else 'None', 
                 obj.naam,
                 obj.straat,
                 f"{obj.huisnummer}",
@@ -313,11 +313,11 @@ class KlantScribe(TypeScribe[Klant]):
         
     def create_default(self, obj_type: type=Particulier) -> Klant | None:
         if obj_type is Particulier:
-            new_obj = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),Gender.Male, rijksregisternummer=RRN('97.00.00-000.00'))
+            new_obj = Particulier('', '', 0, 0, '', date(1970,1,1), Gender.Male, rijksregisternummer=RRN('00.00.00-000.29'))
             self.add(new_obj)
             return new_obj
         if obj_type is Professioneel:
-            new_obj = Professioneel('Dummy Professioneel', 'Industrieweg', 1, 1000, 'Brussel', BTW())
+            new_obj = Professioneel('', '', 0, 0, '', BTW('00000.000.000'))
             self.add(new_obj)
             return new_obj
 
@@ -340,7 +340,7 @@ class VoertuigScribe(TypeScribe[Voertuig]):
         return "VIN", "Merk", "Model", "Bouwjaar", "Prijs", "Status"
     
     def _format_row(self, obj: Voertuig) -> list[str]:
-        return [obj.chassisnummer, 
+        return [obj.uid if obj.uid is not None else 'None', 
                 obj.merk, obj.model, 
                 str(obj.bouwjaar),
                 f"€{obj.dagprijs}", 
@@ -377,7 +377,7 @@ class VoertuigScribe(TypeScribe[Voertuig]):
 
     def create_default(self, obj_type: type=Voertuig) -> Voertuig | None:
         if obj_type is Voertuig:
-            new_obj = Voertuig(VIN(), 'Dummy', 'Wagen', Bouwjaar(1977),VoertuigCategorie('M1'),True,0.99)
+            new_obj = Voertuig(VIN('00000000000000000'), '', '', Bouwjaar(1), VoertuigCategorie.M1, False, 0)
             self.add(new_obj)
             return new_obj
 
@@ -390,14 +390,16 @@ class ReserveringScribe(TypeScribe[Reservering]):
         uids: list[str] = []
         for fuzzable in self._window:
             assert isinstance(fuzzable.obj, Reservering)
-            uids.append(fuzzable.obj.uid)
-            uids.append(fuzzable.obj.klant.uid)
-            uids.append(fuzzable.obj.voertuig.uid)
+            if fuzzable.obj.uid:
+                assert fuzzable.obj.klant.uid and fuzzable.obj.voertuig.uid
+                uids.append(fuzzable.obj.uid) 
+                uids.append(fuzzable.obj.klant.uid)
+                uids.append(fuzzable.obj.voertuig.uid)
         return uids
         
     @property
     def searchable_attrributes(self) -> tuple[str,...]:
-        return 'nummer', 'strfklant', 'strfmodel', 'strfmerk', 'strftype', 'status'
+        return 'uid', 'strfklant', 'strfmodel', 'strfmerk', 'strftype', 'status'
     
     def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, ReferenceType[Any]]) -> None:
         map_klant: dict[str, ReferenceType[Klant]] = next(m for m in maps if m and isinstance(next(iter(m.values()))(), Klant))
@@ -430,7 +432,7 @@ class ReserveringScribe(TypeScribe[Reservering]):
         return "Nummer", "Klant", "Merk", "Model", "Van", "Tot", "Status"
     
     def _format_row(self, obj: Reservering) -> list[str]:
-        return [obj.nummer, 
+        return [obj.uid if obj.uid is not None else 'None', 
                 obj.strfklant, 
                 obj.strfmerk, 
                 obj.strfmodel, 
@@ -448,8 +450,8 @@ class ReserveringScribe(TypeScribe[Reservering]):
             raise ValueError(f"Failed to find attribute {attr}")
         
         try:
-            #hydrate
             if isinstance(value, str):
+                #hydrate
                 if attr == 'van' or attr == 'tot':
                     value = date.fromisoformat(value)
                 elif attr == 'ingeleverd':
@@ -470,20 +472,81 @@ class ReserveringScribe(TypeScribe[Reservering]):
             setattr(obj, attr, value)
             self.refresh(all=False)
             #update voertuig
-            if attr == 'ingeleverd' and value:
-                obj.voertuig.beschikbaar = True
-                #TODO FACTUREN
+            if attr == 'ingeleverd':
+                obj.voertuig.beschikbaar = bool(value)
+                raise RuntimeError
+        except RuntimeError:
+            raise RuntimeError("Voertuig uit/ingeleverd in verkeerde workflow")
         except Exception as e:
             raise ValueError(f"Failed to set attribute: {e}")
         
     def create_default(self, obj_type: type=Reservering) -> Reservering | None:
         if obj_type is Reservering:
-            dummy_klant = Particulier('Dummy Particulier', 'Dorpstraat', 1, 1000, 'Brussel', date(1970,1,1),Gender.Male,rijksregisternummer=RRN('97.00.00-000.00'))
-            dummy_voertuig = Voertuig(VIN(), 'Dummy', 'Wagen', Bouwjaar(1977),VoertuigCategorie('M1'),True,0.99)
+            dummy_klant = Particulier('', '', 0, 0, '', date(1,1,1), Gender.Male, rijksregisternummer=RRN('00.00.00-000.29'))
+            dummy_voertuig = Voertuig(VIN('00000000000000000'), '', '', Bouwjaar(1), VoertuigCategorie.M1, False, 0)
             new_obj = Reservering(dummy_klant, dummy_voertuig, date.today(), date.today(), False)
             self.add(new_obj)
             return new_obj
 
+class FactuurScribe(TypeScribe[Factuur]):
+    """Scribe for managing Reserveringen with dependency mapping."""
+    
+    @property
+    def searchable_attrributes(self) -> tuple[str,...]:
+        return 'uid', 'strfklant', 'strftype', 'strfvoertuig', 'duur'
+    
+    def from_array(self, data_list: list[dict[str, Any]], *maps: dict[str, ReferenceType[Any]]) -> None:
+        map_reservering: dict[str, ReferenceType[Klant]] = next(m for m in maps if m and isinstance(next(iter(m.values()))(), Reservering))
+
+        for dry in data_list:
+            # Hydrate met objects
+            moist = dry.copy()
+            #dry uid: str
+            uid: str = dry['reservering']
+            #assign deref obj
+            moist['reservering'] = map_reservering[uid]()
+            #add reservatie
+            self.add(Factuur.from_dict(moist))
+
+    def get_columns(self) -> tuple[str, ...]:
+        return "Nummer", "Klant", "Voertuig", "Bedrag"
+    
+    def _format_row(self, obj: Factuur) -> list[str]:
+        return [obj.uid if obj.uid is not None else 'None', 
+                obj.strfklant, 
+                f"{obj.strfmerk} {obj.strfmodel}", 
+                f"{obj.bedrag:.2f}"]
+    
+    def update(self, obj: Factuur | int, attr: str, value: Any):
+        """Update a field with validation"""
+        if isinstance(obj, int) and obj >= self.count:
+            raise IndexError("Index out of range")
+        elif isinstance(obj, int):
+            obj = self[obj]
+        if not hasattr(obj, attr):
+            raise ValueError(f"Failed to find attribute {attr}")
+        
+        try:
+            if isinstance(value, str) or attr == 'bedrag':
+                #hydrate
+                value = float(value)
+                #set
+                setattr(obj, attr, value)
+            elif isinstance(value, Reservering) and attr == 'reservering':
+                #set
+                obj.reservering, obj.bedrag = Factuur.finalize_reservatie(value)
+            self.refresh(all=False)
+        except Exception as e:
+            raise ValueError(f"Failed to set attribute: {e}")
+        
+    def create_default(self, obj_type: type=Factuur) -> Factuur | None:
+        if obj_type is Factuur:
+            dummy_klant = Particulier('', '', 0, 0, '', date(1,1,1), Gender.Male, rijksregisternummer=RRN('00.00.00-000.29'))
+            dummy_voertuig = Voertuig(VIN('00000000000000000'), '', '', Bouwjaar(1), VoertuigCategorie.M1, False, 0)
+            dummy_reservering = Reservering(dummy_klant, dummy_voertuig, date(1,1,1), date(1,1,1), False, nummer='')
+            new_obj = Factuur(dummy_reservering)
+            self.add(new_obj)
+            return new_obj
 
 # --- Filters ---
 

@@ -1,13 +1,14 @@
 import json
 from pathlib import Path
 from datamodel import Particulier, Professioneel
-from datascrivener import KlantScribe, VoertuigScribe, ReserveringScribe
+from datascrivener import KlantScribe, VoertuigScribe, ReserveringScribe, FactuurScribe
 from typing import Any
 
 # Initialize the Scribes (Black Boxes)
 klanten = KlantScribe()
 voertuigen = VoertuigScribe()
 reserveringen = ReserveringScribe()
+facturen = FactuurScribe()
 
 DATA_FILE = "data.json"
 TEST_FILE = "test.json"
@@ -27,6 +28,7 @@ def read_data():
     klant_data = json_data.get('particulier', []) + json_data.get('professioneel', [])
     voertuigen_data = json_data.get('voertuigen', [])
     reserveringen_data = json_data.get('reserveringen', [])
+    facturen_data = json_data.get('facturen', [])
     
     klanten.clear()
     klanten.from_array(klant_data)
@@ -35,6 +37,9 @@ def read_data():
 
     reserveringen.clear()
     reserveringen.from_array(reserveringen_data, klanten.uids, voertuigen.uids)
+    
+    facturen.clear()
+    facturen.from_array(facturen_data, reserveringen.uids)
 
 def save_data():
     data = {
@@ -49,7 +54,10 @@ def save_data():
             "tot": r.tot,
             "ingeleverd": r.ingeleverd
             } for r in reserveringen.all],
-        "facturen": []
+        "facturen": [{
+            "reservering": f.uid,
+            "bedrag": f.bedrag
+        } for f in facturen.all]
     }
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4, default=str)
