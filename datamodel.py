@@ -394,7 +394,7 @@ class Factuur:
 
     @property
     def uid(self) -> str | None: 
-        return self.reservering.nummer
+        return self.reservering.uid
     
     @property
     def duur(self) -> int: 

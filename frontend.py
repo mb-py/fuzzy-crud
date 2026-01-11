@@ -153,6 +153,7 @@ class TerminalApp:
         self.table.scribe = scribe
         self.cmd.scribe = scribe
         self.editor.scribe = scribe
+        self.menu = self._create_menu()
         scribe.refresh(all=True)
         
         # Start creating
