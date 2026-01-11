@@ -84,9 +84,11 @@ class AppState:
         """Return from REQUEST/EDIT/CREATING mode"""
         if self.return_mode:
             self.mode = self.return_mode
-        if self.mode != AppMode.MENU:
-            self.sidepanel_open = False
         self.return_mode = None
+        if self.mode == AppMode.MENU:
+            self.enter_menu()
+        else:
+            self.enter_browsing()
 
     def enter_menu(self):
         """Transition to menu mode"""

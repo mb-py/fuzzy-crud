@@ -196,8 +196,6 @@ class TerminalApp:
                 self.state.enter_browsing()
             elif self.state.mode == AppMode.SELECTING:
                 self.editor.finish_field_edit()
-                self.cmd.clear()
-                self.editor.move_next()
             elif self.state.mode in (AppMode.EDITING, AppMode.CREATING):
                 if self.editor.is_editing_field:
                     # Submitting field value
@@ -205,8 +203,6 @@ class TerminalApp:
                     if self.editor.validate_and_submit(data):
                         self.editor.finish_field_edit()
                         self.cmd.clear()
-                        self.editor.move_next()
-                        
                         # If finished all fields, finalize
                         if self.editor.field_idx >= len(self.editor.names):
                             self.state.enter_browsing()
@@ -233,17 +229,12 @@ class TerminalApp:
                     self.editor.validate_and_submit(value)
                     self.editor.finish_field_edit()
                     self.cmd.clear()
-                    self.editor.move_next()
-                    
                     if self.editor.field_idx >= len(self.editor.names):
                         self.state.enter_browsing()
-            
             elif self.state.mode == AppMode.SELECTING:
                 if self.editor.is_editing_field and value:
                     self.editor.finish_field_edit()
                     self.cmd.clear()
-                    self.editor.move_next()
-                    
             if self.layout:
                 self.update_display()
     
@@ -458,11 +449,8 @@ class TerminalApp:
         elif self.state.mode in (AppMode.EDITING, AppMode.CREATING) and self.editor.is_editing_field:
             self.editor.finish_field_edit()
             self.cmd.clear()
-            self.editor.move_next()
         elif self.state.mode in (AppMode.EDITING, AppMode.CREATING) and not self.editor.is_editing_field:
             self.state.exit_mode()
-            if self.state.mode == AppMode.MENU:
-                self.state.enter_menu()
             self.cmd.clear()
             self.editor.finish_obj_edit()
         elif self.state.mode == AppMode.BROWSING:
@@ -577,7 +565,7 @@ class TerminalApp:
             return
         
         if self.editor.is_editing_field:
-            # When editing a field, pass keys to command field
+            # pass keys to command field
             if key in ('enter', 'tab', 'backspace', 'space') or len(key) == 1:
                 self.cmd.key_event(event)
         else:
@@ -588,7 +576,6 @@ class TerminalApp:
                     self.editor.validate_and_submit(selected)
                     self.add_log(f"Selected {self.state.selecting_for}: {selected.uid}")
                     self.state.exit_selecting()
-                    self.editor.move_next()
                     self.selection_table = None
                     self.cmd.clear()
             elif key == 'j' or key == 'down':
