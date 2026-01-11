@@ -248,14 +248,16 @@ class TypeScribe[T](ABC):
         """Remove an object by reference or index"""
         # Handle index-based removal
         if isinstance(obj, int):
-            if 0 <= obj < len(self._objects):
-                obj = self._objects[obj]
+            if 0 <= obj < len(self._window):
+                fuzz = self._window.pop(obj)
+                obj = fuzz.obj
             else:
                 raise IndexError("Index out of range")
         
         # Remove from _objects
         try:
             self._objects.remove(obj)
+            #self.refresh(all=False)
         except ValueError:
             pass  # Object not in list
 
@@ -640,3 +642,19 @@ class UIDFilter(ObjectFilter):
             return False
         value = getattr(obj, 'uid')
         return value in self.uids
+    
+class ReservatiemaandFilter(ObjectFilter):
+    
+    def __init__(self, month: int):
+        self.month = month
+        self.attr_limit_mo = month +1
+        self.attr_year = date.today().year -1
+
+    def matches(self, obj: Any) -> bool:
+        if not isinstance(obj, Reservering):
+            return False
+        if obj.van.month == self.month:
+            return True
+        if obj.tot.month == self.month:
+            return True
+        return False

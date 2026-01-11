@@ -126,7 +126,12 @@ class DataTable():
         if 0 <= self.cursor_index < self.scribe.count:
             return self.scribe[self.cursor_index]
         return None
-
+    
+    def delete_selected(self):
+        """Get the currently selected object"""
+        if 0 <= self.cursor_index < self.scribe.count:
+            self.scribe.remove(self.cursor_index)
+    
     def cursor_down(self):
         max_index = self.scribe.count - 1 if self.scribe.count > 0 else 0
         if self.cursor_index < max_index:

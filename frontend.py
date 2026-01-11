@@ -17,7 +17,7 @@ from hawktui import commandField, ObjectEditor, DataTable, Menu
 from datastore import klanten, voertuigen, reserveringen, facturen, read_data, save_data
 from appstate import AppState, AppMode, ModeKeyBindings
 from datamodel import Reservering, Particulier, Professioneel, Voertuig, Factuur
-from datascrivener import TypeScribe, AttributeFilter, InceptionAttributeFilter, RangeFilter, UIDFilter, CompoundFilter
+from datascrivener import TypeScribe, AttributeFilter, InceptionAttributeFilter, RangeFilter, UIDFilter, CompoundFilter, ReservatiemaandFilter
 
 # --- FILTERS OPDRACHT ---
 read_data()
@@ -26,12 +26,14 @@ filter_zakelijke_klanten = AttributeFilter("strftype", "Professioneel")
 filter_personenwagens = AttributeFilter('categorie', 'M1')
 filter_bestelbusjes = AttributeFilter('categorie', 'N1')
 filter_beschikbare_wagens = AttributeFilter('beschikbaar', True)
-filter_particuliere_reserveringen = AttributeFilter("strftype", "Particulier")
-filter_zakelijke_reserveringen = AttributeFilter("strftype", "Professioneel")
 filter_reserveringen_op_duurtijd = RangeFilter('duur', start=4)
+filter_september = ReservatiemaandFilter(9)
+filter_oktober = ReservatiemaandFilter(10)
+filter_november = ReservatiemaandFilter(11)
+
 
 filter_vrouwelijke_reserveringen = InceptionAttributeFilter('klant', 'geslacht', 'V')
-filter_verhuurd = CompoundFilter(filter_vrouwelijke_reserveringen, filter_particuliere_reserveringen)
+filter_verhuurd = CompoundFilter(filter_vrouwelijke_reserveringen, filter_particuliere_klanten)
 
 def uidmacro():
     reserveringen.set_filter(filter_verhuurd)
@@ -73,31 +75,42 @@ class TerminalApp:
         menu = Menu()
         # View options
         if self.state.active_scribe == klanten:
-            menu.add_separator("Menu Klanten")
+            menu.add_separator("Maak Klanten")
+            menu.add_item("Maak Particulier", lambda: self._create_from_menu(klanten, Particulier))
+            menu.add_item("Maak Professioneel", lambda: self._create_from_menu(klanten, Professioneel))
+            menu.add_separator("Toon Klanten")
             menu.add_item("Toon Alle", lambda: self._switch_scribe(klanten))
             menu.add_item("Toon Particulier", lambda: self._switch_scribe(klanten, filter_particuliere_klanten))
             menu.add_item("Toon Professioneel", lambda: self._switch_scribe(klanten, filter_zakelijke_klanten))
-            menu.add_item("Maak Particulier", lambda: self._create_from_menu(klanten, Particulier))
-            menu.add_item("Maak Professioneel", lambda: self._create_from_menu(klanten, Professioneel))
         elif self.state.active_scribe == voertuigen:
-            menu.add_separator("Menu Voertuigen")
+            menu.add_separator("Maak Voertuigen")
+            menu.add_item("Maak Voertuig", lambda: self._create_from_menu(voertuigen, Voertuig))
+            menu.add_separator("Toon Voertuigen")
             menu.add_item("Toon Alle", lambda: self._switch_scribe(voertuigen))
             menu.add_item("Toon Personenwagens", lambda: self._switch_scribe(voertuigen, filter_personenwagens))
             menu.add_item("Toon Bestelbusjes", lambda: self._switch_scribe(voertuigen, filter_bestelbusjes))
             menu.add_item("Toon Beschikbaar", lambda: self._switch_scribe(voertuigen, filter_beschikbare_wagens))
             menu.add_item("Gebruikt door Vrouwen", lambda: self._switch_scribe(voertuigen, UIDFilter(uidmacro())))
-            menu.add_item("Maak Voertuig", lambda: self._create_from_menu(voertuigen, Voertuig))
         elif self.state.active_scribe == reserveringen:
-            menu.add_separator("Menu Reserveringen")
-            menu.add_item("Toon Alle", lambda: self._switch_scribe(reserveringen))
-            menu.add_item("Toon Zakelijk", lambda: self._switch_scribe(reserveringen, filter_zakelijke_reserveringen))
-            menu.add_item("Toon vanaf 4d", lambda: self._switch_scribe(reserveringen, filter_reserveringen_op_duurtijd))
+            menu.add_separator("Maak Reserveringen")
             menu.add_item("Maak Reservering", lambda: self._create_from_menu(reserveringen, Reservering))
+            menu.add_separator("Toon Reserveringen")
+            menu.add_item("Toon Alle", lambda: self._switch_scribe(reserveringen))
+            menu.add_item("Toon Particulier", lambda: self._switch_scribe(reserveringen, filter_particuliere_klanten))
+            menu.add_item("Toon Zakelijk", lambda: self._switch_scribe(reserveringen, filter_zakelijke_klanten))
+            menu.add_item("Toon vanaf 4d", lambda: self._switch_scribe(reserveringen, filter_reserveringen_op_duurtijd))
+            menu.add_item("Toon September", lambda: self._switch_scribe(reserveringen, filter_september))
+            menu.add_item("Toon Oktober", lambda: self._switch_scribe(reserveringen, filter_oktober))
+            menu.add_item("Toon November", lambda: self._switch_scribe(reserveringen, filter_november))
+            menu.add_separator("Statistieken")
+            menu.add_item("Statistieken per Maand", lambda: self._log_reservatie_statistieken_maand())
+            menu.add_item("Statistieken per Ktype", lambda: self._log_reservatie_statistieken_type())
         elif self.state.active_scribe == facturen:
-            menu.add_separator("Menu Facturen")
+            menu.add_separator("Maak Facturen")
+            menu.add_item("Maak Factuur", lambda: self._create_from_menu(facturen, Factuur))
+            menu.add_separator("Toon Facturen")
             menu.add_item("Toon Alle", lambda: self._switch_scribe(facturen))
             menu.add_item("Toon Zakelijk", lambda: self._switch_scribe(facturen, filter_zakelijke_klanten))
-            menu.add_item("Maak Factuur", lambda: self._create_from_menu(facturen, Factuur))
         menu.add_separator("Ander Menu")
         if self.state.active_scribe != klanten:
             menu.add_item("Klanten", lambda: self._switch_scribe(klanten, browse=False))
@@ -114,7 +127,6 @@ class TerminalApp:
         menu.add_item("Sluit Programma", lambda: self.exit())
         menu.add_separator("TODO")
         menu.add_item("Prijsplafond instellen", lambda: self.add_log('Interactief prijsplafond is nog niet geimplementeerd'))
-        menu.add_item("Statistieken", lambda: self.add_log('Satistiek peneel is nog niet geimplementeerd'))
         
         return menu
     
@@ -233,6 +245,35 @@ class TerminalApp:
         if len(self.logs) > 4:
             self.logs.pop(0)
     
+    def _log_reservatie_statistieken_maand(self):
+        """Add a log message"""
+        reset_filter = reserveringen._active_filter
+        reset_query = reserveringen._last_query
+        reserveringen.refresh()
+        reserveringen.set_filter(filter_september)
+        aantal_september = reserveringen.count
+        reserveringen.set_filter(filter_oktober)
+        aantal_oktober = reserveringen.count
+        reserveringen.set_filter(filter_november)
+        aantal_november = reserveringen.count
+        reserveringen._active_filter = reset_filter
+        reserveringen._last_query = reset_query
+        reserveringen.refresh(all=False)
+        self.add_log(f"Aantal verhuringen per maand: September {aantal_september}, Oktober {aantal_oktober}, November {aantal_november}")
+
+    def _log_reservatie_statistieken_type(self):
+        """Add a log message"""
+        reset_filter = reserveringen._active_filter
+        reset_query = reserveringen._last_query
+        reserveringen.refresh()
+        reserveringen.set_filter(filter_particuliere_klanten)
+        aantal_particulier = reserveringen.count
+        reserveringen.set_filter(filter_zakelijke_klanten)
+        aantal_zakelijk = reserveringen.count
+        reserveringen._active_filter = reset_filter
+        reserveringen._last_query = reset_query
+        reserveringen.refresh(all=False)
+        self.add_log(f"Aantal verhuringen Particulier/Zakelijke: Particulier {aantal_particulier}, Zakelijk {aantal_zakelijk}")
     def make_layout(self) -> Layout:
         """Create the application layout"""
         layout = Layout(name="root")
@@ -432,8 +473,10 @@ class TerminalApp:
                 self.cmd.clear()
                 self.add_log(f"Creating new {obj_type.__name__}")
         elif key == 'd':
-            # Delete (placeholder)
-                self.add_log("Delete not implemented yet")
+                obj = self.table.get_selected()
+                self.add_log(f"Deleting {obj.uid}")
+                self.table.delete_selected()
+                self.update_display()
         elif key == 'm':
             # Open menu
             self.state.enter_menu()
