@@ -18,7 +18,7 @@ class Gender(str, Enum):
         }[self.value]
     
     @classmethod
-    def parse(cls, data: str) -> Gender:
+    def parse(cls, data: str) -> 'Gender':
         """Parse from strings"""
         data = data.strip().capitalize()
         # char match
@@ -62,7 +62,7 @@ class VoertuigCategorie(str, Enum):
             }[self.value]
     
     @classmethod
-    def parse(cls, data: str) -> VoertuigCategorie:
+    def parse(cls, data: str) -> 'VoertuigCategorie':
         """Parse from code (M1, N1) or name (Personenwagen, Bestelbus) strings"""
         data = data.strip().capitalize()
         # code match
@@ -123,7 +123,7 @@ class VIN(str):
         return cls.legal_chk_digits[chk_sum]
     
     @classmethod
-    def generate(cls) -> VIN:
+    def generate(cls) -> 'VIN':
         base = ''.join(np.random.choice(list(cls.legal_characters), size=17))
         chk = cls._checksum(base)
         data = base[:8] + chk + base[9:]
@@ -154,7 +154,7 @@ class BTW(str):
         return str(chk_num)
 
     @classmethod
-    def generate(cls) -> BTW:
+    def generate(cls) -> 'BTW':
         x, y, z = np.random.randint(100,1000), np.random.randint(100,1000), np.random.randint(0,10)
         data = f"{np.random.choice([0,1])}{x:04d}.{y:03d}.{z:01d}"
         data += cls._checksum(data)
@@ -193,7 +193,7 @@ class RRN(str):
         return f"{chk_num:02d}"
 
     @classmethod
-    def generate(cls, geboortedatum: date, is_man: bool) -> RRN:
+    def generate(cls, geboortedatum: date, is_man: bool) -> 'RRN':
         x: str = geboortedatum.strftime("%y.%m.%d")
         y: int = np.random.randint(0,499)*2     #0 =< y =< 996
         y += 1 if is_man else 2                 #0 < y < 999

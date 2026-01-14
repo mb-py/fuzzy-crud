@@ -10,6 +10,13 @@ from string import punctuation
 from weakref import ReferenceType, ref, finalize
 from collections.abc import Iterator
 
+class ObjectFilter(ABC):
+    """Base class for filters"""
+    @abstractmethod
+    def matches(self, obj: Any) -> bool:
+        """Check if object matches this filter"""
+        pass
+    
 class Fuzzable[T]:
     """
     Wrapper that encapsulates scoring logic,  and matching string.
@@ -552,12 +559,6 @@ class FactuurScribe(TypeScribe[Factuur]):
 
 # --- Filters ---
 
-class ObjectFilter(ABC):
-    """Base class for filters"""
-    @abstractmethod
-    def matches(self, obj: Any) -> bool:
-        """Check if object matches this filter"""
-        pass
 
 class ClassFilter(ObjectFilter):
     """Filter by class name"""
